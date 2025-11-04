@@ -1,0 +1,241 @@
+package es.arendel.riders_management.service;
+
+import es.arendel.riders_management.dto.auth.*;
+import es.arendel.riders_management.entity.TenantEntity;
+import es.arendel.riders_management.entity.UserEntity;
+import es.arendel.riders_management.repository.TenantRepository;
+import es.arendel.riders_management.repository.UserRepository;
+import es.arendel.riders_management.security.JwtUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.Optional;
+import java.util.UUID;
+
+@Service
+public class AuthService {
+
+    private static final Logger logger = LoggerFactory.getLogger(AuthService.class);
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private TenantRepository tenantRepository;
+
+    @Autowired
+    private JwtUtil jwtUtil;
+
+    private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
+
+    /**
+     * Autentica un usuario y devuelve un token JWT
+     */
+    @Transactional
+    public LoginResponse login(LoginRequest request) {
+        // Buscar usuario por email
+        UserEntity user = userRepository.findByEmailAndIsActiveTrue(request.getEmail())
+                .orElseThrow(() -> new RuntimeException("Credenciales inválidas"));
+
+        // Verificar contraseña
+        if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
+            throw new RuntimeException("Credenciales inválidas");
+        }
+
+        // Obtener tenant
+        TenantEntity tenant = tenantRepository.findById(user.getTenantId())
+                .orElseThrow(() -> new RuntimeException("Tenant no encontrado"));
+
+        // Actualizar última fecha de login
+        user.setLastLoginAt(LocalDateTime.now());
+
+        // Si "Recordar sesión" está activo, generar remember token
+        String rememberToken = null;
+        if (Boolean.TRUE.equals(request.getRememberMe())) {
+            rememberToken = UUID.randomUUID().toString();
+            user.setRememberToken(rememberToken);
+            user.setRememberTokenExpiresAt(LocalDateTime.now().plusDays(30)); // 30 días
+        }
+
+        userRepository.save(user);
+
+        // Generar token JWT
+        String jwtToken = jwtUtil.generateToken(
+                user.getEmail(),
+                user.getId(),
+                user.getRole().name(),
+                tenant.getId(),
+                tenant.getCompanyName(),
+                Boolean.TRUE.equals(request.getRememberMe())
+        );
+
+        logger.info("Usuario autenticado: {}", user.getEmail());
+
+        return LoginResponse.builder()
+                .token(jwtToken)
+                .type("Bearer")
+                .email(user.getEmail())
+                .fullName(user.getFullName())
+                .role(user.getRole().name())
+                .companyName(tenant.getCompanyName())
+                .tenantId(tenant.getId())
+                .rememberToken(rememberToken)
+                .build();
+    }
+
+    /**
+     * Registra un nuevo usuario
+     */
+    @Transactional
+    public LoginResponse register(RegisterRequest request) {
+        // Verificar si el email ya existe
+        if (userRepository.existsByEmail(request.getEmail())) {
+            throw new RuntimeException("El email ya está registrado");
+        }
+
+        // Verificar que el tenant existe
+        TenantEntity tenant = tenantRepository.findById(request.getTenantId())
+                .orElseThrow(() -> new RuntimeException("Tenant no encontrado"));
+
+        // Crear nuevo usuario
+        UserEntity newUser = UserEntity.builder()
+                .email(request.getEmail())
+                .passwordHash(passwordEncoder.encode(request.getPassword()))
+                .fullName(request.getFullName())
+                .role(UserEntity.UserRole.valueOf(request.getRole().toUpperCase()))
+                .tenantId(request.getTenantId())
+                .isActive(true)
+                .build();
+
+        userRepository.save(newUser);
+
+        // Generar token JWT
+        String jwtToken = jwtUtil.generateToken(
+                newUser.getEmail(),
+                newUser.getId(),
+                newUser.getRole().name(),
+                tenant.getId(),
+                tenant.getCompanyName(),
+                false
+        );
+
+        logger.info("Usuario registrado: {}", newUser.getEmail());
+
+        return LoginResponse.builder()
+                .token(jwtToken)
+                .type("Bearer")
+                .email(newUser.getEmail())
+                .fullName(newUser.getFullName())
+                .role(newUser.getRole().name())
+                .companyName(tenant.getCompanyName())
+                .tenantId(tenant.getId())
+                .build();
+    }
+
+    /**
+     * Inicia el proceso de recuperación de contraseña
+     */
+    @Transactional
+    public void forgotPassword(ForgotPasswordRequest request) {
+        Optional<UserEntity> userOpt = userRepository.findByEmailAndIsActiveTrue(request.getEmail());
+
+        if (userOpt.isEmpty()) {
+            // Por seguridad, no revelamos si el email existe o no
+            logger.warn("Intento de recuperación de contraseña para email no registrado: {}", request.getEmail());
+            return;
+        }
+
+        UserEntity user = userOpt.get();
+
+        // Generar token de reset
+        String resetToken = UUID.randomUUID().toString();
+        user.setResetToken(resetToken);
+        user.setResetTokenExpiresAt(LocalDateTime.now().plusHours(1)); // 1 hora de validez
+
+        userRepository.save(user);
+
+        // TODO: Enviar email con el link de reset
+        // Por ahora solo loguear el token (en producción esto sería un email)
+        logger.info("Token de reset generado para {}: {}", user.getEmail(), resetToken);
+        logger.info("Link de reset: http://localhost:3000/reset-password?token={}", resetToken);
+    }
+
+    /**
+     * Resetea la contraseña usando el token de recuperación
+     */
+    @Transactional
+    public void resetPassword(ResetPasswordRequest request) {
+        UserEntity user = userRepository.findByResetTokenAndResetTokenExpiresAtAfter(
+                        request.getToken(),
+                        LocalDateTime.now()
+                )
+                .orElseThrow(() -> new RuntimeException("Token inválido o expirado"));
+
+        // Actualizar contraseña
+        user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+
+        // Limpiar token de reset
+        user.setResetToken(null);
+        user.setResetTokenExpiresAt(null);
+
+        userRepository.save(user);
+
+        logger.info("Contraseña reseteada para usuario: {}", user.getEmail());
+    }
+
+    /**
+     * Login con remember token
+     */
+    @Transactional
+    public LoginResponse loginWithRememberToken(String rememberToken) {
+        UserEntity user = userRepository.findByRememberToken(rememberToken)
+                .orElseThrow(() -> new RuntimeException("Token de sesión inválido"));
+
+        // Verificar que el token no haya expirado
+        if (user.getRememberTokenExpiresAt() == null ||
+                user.getRememberTokenExpiresAt().isBefore(LocalDateTime.now())) {
+            throw new RuntimeException("Token de sesión expirado");
+        }
+
+        // Verificar que el usuario esté activo
+        if (!Boolean.TRUE.equals(user.getIsActive())) {
+            throw new RuntimeException("Usuario inactivo");
+        }
+
+        // Obtener tenant
+        TenantEntity tenant = tenantRepository.findById(user.getTenantId())
+                .orElseThrow(() -> new RuntimeException("Tenant no encontrado"));
+
+        // Actualizar última fecha de login
+        user.setLastLoginAt(LocalDateTime.now());
+        userRepository.save(user);
+
+        // Generar nuevo token JWT
+        String jwtToken = jwtUtil.generateToken(
+                user.getEmail(),
+                user.getId(),
+                user.getRole().name(),
+                tenant.getId(),
+                tenant.getCompanyName(),
+                true
+        );
+
+        logger.info("Login con remember token exitoso: {}", user.getEmail());
+
+        return LoginResponse.builder()
+                .token(jwtToken)
+                .type("Bearer")
+                .email(user.getEmail())
+                .fullName(user.getFullName())
+                .role(user.getRole().name())
+                .companyName(tenant.getCompanyName())
+                .tenantId(tenant.getId())
+                .rememberToken(rememberToken)
+                .build();
+    }
+}

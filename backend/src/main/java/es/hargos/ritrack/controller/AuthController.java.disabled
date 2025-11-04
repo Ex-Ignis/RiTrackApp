@@ -1,0 +1,131 @@
+package es.arendel.riders_management.controller;
+
+import es.arendel.riders_management.dto.auth.*;
+import es.arendel.riders_management.service.AuthService;
+import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.HashMap;
+import java.util.Map;
+
+@RestController
+@RequestMapping("/api/auth")
+@CrossOrigin(origins = "*", maxAge = 3600)
+public class AuthController {
+
+    private static final Logger logger = LoggerFactory.getLogger(AuthController.class);
+
+    @Autowired
+    private AuthService authService;
+
+    /**
+     * POST /api/auth/login
+     * Autentica un usuario y devuelve un token JWT
+     */
+    @PostMapping("/login")
+    public ResponseEntity<?> login(@Valid @RequestBody LoginRequest request) {
+        try {
+            LoginResponse response = authService.login(request);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error en login: {}", e.getMessage());
+            Map<String, String> error = new HashMap<>();
+            error.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
+        }
+    }
+
+    /**
+     * POST /api/auth/register
+     * Registra un nuevo usuario
+     */
+    @PostMapping("/register")
+    public ResponseEntity<?> register(@Valid @RequestBody RegisterRequest request) {
+        try {
+            LoginResponse response = authService.register(request);
+            return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        } catch (Exception e) {
+            logger.error("Error en register: {}", e.getMessage());
+            Map<String, String> error = new HashMap<>();
+            error.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+        }
+    }
+
+    /**
+     * POST /api/auth/forgot-password
+     * Inicia el proceso de recuperación de contraseña
+     */
+    @PostMapping("/forgot-password")
+    public ResponseEntity<?> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+        try {
+            authService.forgotPassword(request);
+            Map<String, String> response = new HashMap<>();
+            response.put("message", "Si el email existe, recibirás instrucciones para restablecer tu contraseña");
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error en forgot-password: {}", e.getMessage());
+            Map<String, String> error = new HashMap<>();
+            error.put("message", "Error procesando la solicitud");
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
+    }
+
+    /**
+     * POST /api/auth/reset-password
+     * Resetea la contraseña usando el token de recuperación
+     */
+    @PostMapping("/reset-password")
+    public ResponseEntity<?> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        try {
+            authService.resetPassword(request);
+            Map<String, String> response = new HashMap<>();
+            response.put("message", "Contraseña restablecida exitosamente");
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error en reset-password: {}", e.getMessage());
+            Map<String, String> error = new HashMap<>();
+            error.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+        }
+    }
+
+    /**
+     * POST /api/auth/remember
+     * Login con remember token
+     */
+    @PostMapping("/remember")
+    public ResponseEntity<?> loginWithRememberToken(@RequestBody Map<String, String> request) {
+        try {
+            String rememberToken = request.get("rememberToken");
+            if (rememberToken == null || rememberToken.isEmpty()) {
+                throw new RuntimeException("Remember token es requerido");
+            }
+
+            LoginResponse response = authService.loginWithRememberToken(rememberToken);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error en remember login: {}", e.getMessage());
+            Map<String, String> error = new HashMap<>();
+            error.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
+        }
+    }
+
+    /**
+     * GET /api/auth/health
+     * Health check endpoint (público, no requiere autenticación)
+     */
+    @GetMapping("/health")
+    public ResponseEntity<?> health() {
+        Map<String, String> response = new HashMap<>();
+        response.put("status", "OK");
+        response.put("service", "auth");
+        return ResponseEntity.ok(response);
+    }
+}

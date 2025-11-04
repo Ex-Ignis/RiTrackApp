@@ -1,0 +1,4 @@
+# Private keys - NEVER commit to Git
+*.pem
+*.key
+!.gitignore

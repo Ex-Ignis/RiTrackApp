@@ -1,0 +1,35 @@
+HELP.md
+# Maven
+target/
+.mvn/wrapper/maven-wrapper.jar
+
+CONTEXT.md
+# Logs
+*.log
+logs/
+
+# Spring Boot
+spring-boot-devtools.properties
+
+# IDEs
+.vscode/
+.idea/
+.claude/
+*.iml
+*.iws
+*.ipr
+.project
+.classpath
+.settings
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Configuración sensible
+*.env
+*.pem
+application.properties
+application.yml
+*.keystore
+
