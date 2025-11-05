@@ -2,6 +2,8 @@ package es.hargos.ritrack.websocket;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import es.hargos.ritrack.dto.RiderLocationDto;
+import es.hargos.ritrack.security.JwtUtil;
+import io.jsonwebtoken.Claims;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -21,6 +23,10 @@ public class RiderLocationWebSocketHandler implements WebSocketHandler {
 
     private static final Logger logger = LoggerFactory.getLogger(RiderLocationWebSocketHandler.class);
 
+    // MULTI-TENANT: Mapa que asocia cada sesión con su tenant autenticado
+    // Key: sessionId, Value: tenantId
+    private final ConcurrentHashMap<String, Long> sessionTenantMap = new ConcurrentHashMap<>();
+
     // Mapa que asocia cada sesion con la ciudad que está monitoreando
     // Key: sessionId, Value: cityId (0 significa todas las ciudades)
     private final ConcurrentHashMap<String, Integer> sessionCityMap = new ConcurrentHashMap<>();
@@ -35,9 +41,13 @@ public class RiderLocationWebSocketHandler implements WebSocketHandler {
     // ObjectMapper para serializar JSON
     private final ObjectMapper objectMapper;
 
-    // Constructor que inyecta el ObjectMapper configurado
-    public RiderLocationWebSocketHandler(ObjectMapper objectMapper) {
+    // JwtUtil para validar tokens
+    private final JwtUtil jwtUtil;
+
+    // Constructor que inyecta dependencias
+    public RiderLocationWebSocketHandler(ObjectMapper objectMapper, JwtUtil jwtUtil) {
         this.objectMapper = objectMapper;
+        this.jwtUtil = jwtUtil;
     }
 
     // Executor para manejar tareas en background
@@ -84,6 +94,9 @@ public class RiderLocationWebSocketHandler implements WebSocketHandler {
             String action = (String) messageData.get("action");
 
             switch (action != null ? action : "") {
+                case "authenticate":
+                    handleAuthentication(session, messageData);
+                    break;
                 case "subscribe_city":
                     handleCitySubscription(session, messageData);
                     break;
@@ -113,6 +126,71 @@ public class RiderLocationWebSocketHandler implements WebSocketHandler {
      * ACCIONES DISPONIBLES
      * ###############################################################################################################
      */
+
+    /**
+     * MULTI-TENANT: Autentica la sesión con un JWT
+     * Extrae el tenantId del token y lo guarda en sessionTenantMap
+     */
+    private void handleAuthentication(WebSocketSession session, Map<String, Object> messageData) {
+        try {
+            String token = (String) messageData.get("token");
+
+            if (token == null || token.trim().isEmpty()) {
+                sendMessageToSession(session, createErrorMessage("Token JWT requerido para autenticación"));
+                session.close(CloseStatus.NOT_ACCEPTABLE);
+                return;
+            }
+
+            // Validar el JWT y extraer claims
+            Claims claims = jwtUtil.validateAndExtractClaims(token);
+
+            // Extraer tenantId del JWT (viene en los claims del token de HargosAuth)
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> tenants = (List<Map<String, Object>>) claims.get("tenants");
+
+            if (tenants == null || tenants.isEmpty()) {
+                sendMessageToSession(session, createErrorMessage("JWT no contiene información de tenants"));
+                session.close(CloseStatus.NOT_ACCEPTABLE);
+                return;
+            }
+
+            // Buscar el tenant de RiTrack
+            Long tenantId = null;
+            for (Map<String, Object> tenant : tenants) {
+                if ("RiTrack".equals(tenant.get("appName"))) {
+                    Object tenantIdObj = tenant.get("tenantId");
+                    if (tenantIdObj instanceof Number) {
+                        tenantId = ((Number) tenantIdObj).longValue();
+                    } else if (tenantIdObj instanceof String) {
+                        tenantId = Long.parseLong((String) tenantIdObj);
+                    }
+                    break;
+                }
+            }
+
+            if (tenantId == null) {
+                sendMessageToSession(session, createErrorMessage("Usuario no tiene acceso a RiTrack"));
+                session.close(CloseStatus.NOT_ACCEPTABLE);
+                return;
+            }
+
+            // Guardar tenantId en el mapa de sesiones
+            sessionTenantMap.put(session.getId(), tenantId);
+
+            logger.info("Session {} autenticada para tenant {}", session.getId(), tenantId);
+            sendMessageToSession(session, createSimpleMessage("authenticated",
+                "Autenticación exitosa para tenant " + tenantId));
+
+        } catch (Exception e) {
+            logger.error("Error en autenticación de sesión {}: {}", session.getId(), e.getMessage());
+            sendMessageToSession(session, createErrorMessage("Autenticación fallida: " + e.getMessage()));
+            try {
+                session.close(CloseStatus.NOT_ACCEPTABLE);
+            } catch (IOException ioException) {
+                logger.error("Error cerrando sesión: {}", ioException.getMessage());
+            }
+        }
+    }
 
     /**
      * Session vinculada a una sola ciudad
@@ -185,10 +263,14 @@ public class RiderLocationWebSocketHandler implements WebSocketHandler {
 
     /**
      * Permite desacoplar la session de la ciudad o ciudades vinculadas
+     * MULTI-TENANT: También limpia el tenantId de la sesión
      */
     private void removeSessionFromAllSubscriptions(WebSocketSession session) {
         String sessionId = session.getId();
         Integer previousCityId = sessionCityMap.remove(sessionId);
+
+        // MULTI-TENANT: Limpiar tenantId
+        sessionTenantMap.remove(sessionId);
 
         if (previousCityId != null) {
             // Era una suscripción específica de ciudad
@@ -226,8 +308,13 @@ public class RiderLocationWebSocketHandler implements WebSocketHandler {
 
     /**
      * Envía ubicaciones de riders a sesiones suscritas a una ciudad específica
+     * MULTI-TENANT: Solo envía a sesiones del mismo tenant
+     *
+     * @param tenantId Tenant ID propietario de los datos
+     * @param cityId Ciudad ID
+     * @param locations Ubicaciones de riders
      */
-    public void broadcastRiderLocationsByCity(Integer cityId, List<RiderLocationDto> locations) {
+    public void broadcastRiderLocationsByCity(Long tenantId, Integer cityId, List<RiderLocationDto> locations) {
 //        logger.info("=== BROADCAST DEBUG ===");
 //        logger.info("CityId recibido: {}", cityId);
 //        logger.info("Locations a enviar: {}", locations.size());
@@ -236,24 +323,44 @@ public class RiderLocationWebSocketHandler implements WebSocketHandler {
 //        logger.info("Sesiones totales en allCitiesSessions: {}", allCitiesSessions.size());
 
         if (locations.isEmpty()) {
-            logger.info("No hay ubicaciones para enviar a ciudad {}", cityId);
+            logger.debug("Tenant {}, Ciudad {}: No hay ubicaciones para enviar", tenantId, cityId);
             return;
         }
 
-        // Enviar a sesiones específicas de esta ciudad
+        // MULTI-TENANT: Filtrar sesiones específicas de esta ciudad que pertenecen al tenant
         CopyOnWriteArraySet<WebSocketSession> citySpecificSessions = citySessions.get(cityId);
         if (citySpecificSessions != null && !citySpecificSessions.isEmpty()) {
-            broadcastToSessions(citySpecificSessions, createLocationMessage(locations, cityId));
-            logger.debug("Enviadas {} ubicaciones a {} sesiones de ciudad {}",
-                    locations.size(), citySpecificSessions.size(), cityId);
+            Set<WebSocketSession> tenantSessions = filterSessionsByTenant(citySpecificSessions, tenantId);
+            if (!tenantSessions.isEmpty()) {
+                broadcastToSessions(tenantSessions, createLocationMessage(locations, cityId));
+                logger.debug("Tenant {}, Ciudad {}: Enviadas {} ubicaciones a {} sesiones",
+                        tenantId, cityId, locations.size(), tenantSessions.size());
+            }
         }
 
-        // También enviar a sesiones que quieren ver todas las ciudades
+        // MULTI-TENANT: Filtrar sesiones de todas las ciudades que pertenecen al tenant
         if (!allCitiesSessions.isEmpty()) {
-            broadcastToSessions(allCitiesSessions, createLocationMessage(locations, cityId));
-            logger.debug("Enviadas {} ubicaciones a {} sesiones de todas las ciudades",
-                    locations.size(), allCitiesSessions.size());
+            Set<WebSocketSession> tenantSessions = filterSessionsByTenant(allCitiesSessions, tenantId);
+            if (!tenantSessions.isEmpty()) {
+                broadcastToSessions(tenantSessions, createLocationMessage(locations, cityId));
+                logger.debug("Tenant {}: Enviadas {} ubicaciones a {} sesiones (todas las ciudades)",
+                        tenantId, locations.size(), tenantSessions.size());
+            }
         }
+    }
+
+    /**
+     * MULTI-TENANT: Filtra sesiones que pertenecen a un tenant específico
+     */
+    private Set<WebSocketSession> filterSessionsByTenant(Set<WebSocketSession> sessions, Long tenantId) {
+        Set<WebSocketSession> filtered = new HashSet<>();
+        for (WebSocketSession session : sessions) {
+            Long sessionTenant = sessionTenantMap.get(session.getId());
+            if (tenantId.equals(sessionTenant)) {
+                filtered.add(session);
+            }
+        }
+        return filtered;
     }
 
     /**
@@ -364,6 +471,7 @@ public class RiderLocationWebSocketHandler implements WebSocketHandler {
 
     public void destroy() {
         scheduler.shutdown();
+        sessionTenantMap.clear();
         sessionCityMap.clear();
         citySessions.clear();
         allCitiesSessions.clear();

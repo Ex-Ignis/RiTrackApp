@@ -44,7 +44,7 @@ public class RiderAssignmentService {
         Object result = glovoClient.asignarPuntosInicioAEmpleado(tenantId, riderId, payload);
 
         // Limpiar caché para reflejar cambios
-        roosterCache.clearCache();
+        roosterCache.clearCache(tenantId);
         logger.info("Tenant {}: Starting points actualizados y caché limpiado para rider {}", tenantId, riderId);
 
         return (Map<String, Object>) result;
@@ -70,7 +70,7 @@ public class RiderAssignmentService {
         Object result = glovoClient.asignarVehiculosAEmpleado(tenantId, riderId, payload);
 
         // Limpiar caché para reflejar cambios
-        roosterCache.clearCache();
+        roosterCache.clearCache(tenantId);
         logger.info("Tenant {}: Vehículos actualizados y caché limpiado para rider {}", tenantId, riderId);
 
         return (Map<String, Object>) result;

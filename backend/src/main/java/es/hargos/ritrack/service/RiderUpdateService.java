@@ -42,7 +42,7 @@ public class RiderUpdateService {
         Object result = glovoClient.actualizarEmpleado(tenantId, riderId, payload);
 
         // Limpiar caché para reflejar cambios inmediatamente
-        roosterCache.clearCache();
+        roosterCache.clearCache(tenantId);
         logger.info("Tenant {}: Cache limpiado después de actualización de rider {}", tenantId, riderId);
 
         return (Map<String, Object>) result;

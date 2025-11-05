@@ -151,9 +151,8 @@ public class RiderLocationService {
                     List<RiderLocationDto> locations = getRiderLocationsByCity(tenantId, cityId);
 
                     if (!locations.isEmpty()) {
-                        // Broadcast via WebSocket
-                        // TODO: Implementar filtrado por tenant en WebSocket handler
-                        webSocketHandler.broadcastRiderLocationsByCity(cityId, locations);
+                        // Broadcast via WebSocket (MULTI-TENANT: Filtra por tenant automáticamente)
+                        webSocketHandler.broadcastRiderLocationsByCity(tenantId, cityId, locations);
                         logger.info("Tenant {}, Ciudad {}: Enviadas {} ubicaciones",
                             tenantName, cityId, locations.size());
                     }
@@ -411,8 +410,8 @@ public class RiderLocationService {
 
             for (Integer cityId : activeCityIds) {
                 List<RiderLocationDto> mockLocations = generateMockLocations(tenantId, cityId);
-                webSocketHandler.broadcastRiderLocationsByCity(cityId, mockLocations);
-                logger.info("Enviadas {} ubicaciones mock para ciudad {}", mockLocations.size(), cityId);
+                webSocketHandler.broadcastRiderLocationsByCity(tenantId, cityId, mockLocations);
+                logger.info("Tenant {}: Enviadas {} ubicaciones mock para ciudad {}", tenantId, mockLocations.size(), cityId);
             }
 
         } catch (Exception e) {

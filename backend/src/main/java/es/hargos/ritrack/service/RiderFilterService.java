@@ -697,12 +697,38 @@ public class RiderFilterService {
         return metrics;
     }
 
-    public void clearCache() {
-        roosterCache.clearCache();
+    /**
+     * Limpia el cache de un tenant específico
+     * MULTI-TENANT: Solo invalida el cache de un tenant, no de todos
+     */
+    public void clearCache(Long tenantId) {
+        // Limpiar cache de Rooster para este tenant
+        roosterCache.clearCache(tenantId);
+
+        // Limpiar entradas de Live cache que pertenecen a este tenant
+        int removedEntries = 0;
+        Iterator<Map.Entry<String, CachedLiveData>> iterator = liveCache.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<String, CachedLiveData> entry = iterator.next();
+            if (entry.getKey().startsWith("tenant-" + tenantId + "-")) {
+                iterator.remove();
+                removedEntries++;
+            }
+        }
+
+        logger.info("Tenant {}: Cache limpiado ({} entradas de Live cache removidas)", tenantId, removedEntries);
+    }
+
+    /**
+     * Limpia TODOS los caches de TODOS los tenants (usar con precaución)
+     * Solo para mantenimiento o emergencias
+     */
+    public void clearAllTenantsCache() {
+        roosterCache.clearAllTenantsCache();
         liveCache.clear();
         cacheHits.set(0);
         cacheMisses.set(0);
-        logger.info("Todos los cachés y métricas limpiados");
+        logger.warn("ADVERTENCIA: Todos los cachés y métricas limpiados para TODOS los tenants");
     }
 
     @PreDestroy
