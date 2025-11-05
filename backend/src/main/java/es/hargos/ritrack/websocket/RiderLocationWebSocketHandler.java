@@ -1,9 +1,9 @@
 package es.hargos.ritrack.websocket;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.nimbusds.jwt.JWTClaimsSet;
 import es.hargos.ritrack.dto.RiderLocationDto;
 import es.hargos.ritrack.security.JwtUtil;
-import io.jsonwebtoken.Claims;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -141,12 +141,24 @@ public class RiderLocationWebSocketHandler implements WebSocketHandler {
                 return;
             }
 
-            // Validar el JWT y extraer claims
-            Claims claims = jwtUtil.validateAndExtractClaims(token);
+            // Validar el JWT
+            if (!jwtUtil.validateToken(token)) {
+                sendMessageToSession(session, createErrorMessage("Token JWT inválido o expirado"));
+                session.close(CloseStatus.NOT_ACCEPTABLE);
+                return;
+            }
+
+            // Extraer claims del JWT
+            JWTClaimsSet claims = jwtUtil.extractAllClaims(token);
+            if (claims == null) {
+                sendMessageToSession(session, createErrorMessage("Error extrayendo claims del JWT"));
+                session.close(CloseStatus.NOT_ACCEPTABLE);
+                return;
+            }
 
             // Extraer tenantId del JWT (viene en los claims del token de HargosAuth)
             @SuppressWarnings("unchecked")
-            List<Map<String, Object>> tenants = (List<Map<String, Object>>) claims.get("tenants");
+            List<Map<String, Object>> tenants = (List<Map<String, Object>>) claims.getClaim("tenants");
 
             if (tenants == null || tenants.isEmpty()) {
                 sendMessageToSession(session, createErrorMessage("JWT no contiene información de tenants"));
