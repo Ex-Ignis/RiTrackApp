@@ -358,7 +358,7 @@ public class RiderLocationController {
             }
 
             List<RiderLocationDto> testData = generateTestRiderData(count, cityId);
-            webSocketHandler.broadcastRiderLocationsByCity(tenantId, cityId, testData);
+            webSocketHandler.broadcastRiderLocationsByCity(cityId, testData);
 
             Map<String, Object> response = new HashMap<>();
             response.put("message", "Datos de prueba enviados");

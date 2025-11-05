@@ -151,10 +151,8 @@ public class RiderLocationService {
                     List<RiderLocationDto> locations = getRiderLocationsByCity(tenantId, cityId);
 
                     if (!locations.isEmpty()) {
-                        // Broadcast via WebSocket (MULTI-TENANT: Filtra por tenant automáticamente)
-                        webSocketHandler.broadcastRiderLocationsByCity(tenantId, cityId, locations);
-                        logger.info("Tenant {}, Ciudad {}: Enviadas {} ubicaciones",
-                            tenantName, cityId, locations.size());
+                        // Broadcast via WebSocket
+                        webSocketHandler.broadcastRiderLocationsByCity(cityId, locations);
                     }
 
                 } catch (Exception e) {
@@ -296,7 +294,7 @@ public class RiderLocationService {
         Map<String, Object> responseMap = (Map<String, Object>) ridersData;
 
         @SuppressWarnings("unchecked")
-        List<Map<String, Object>> ridersList = (List<Map<String, Object>>) responseMap.get("data");
+        List<Map<String, Object>> ridersList = (List<Map<String, Object>>) responseMap.get("content");
 
         if (ridersList == null || ridersList.isEmpty()) {
             return new ArrayList<>();
@@ -410,8 +408,7 @@ public class RiderLocationService {
 
             for (Integer cityId : activeCityIds) {
                 List<RiderLocationDto> mockLocations = generateMockLocations(tenantId, cityId);
-                webSocketHandler.broadcastRiderLocationsByCity(tenantId, cityId, mockLocations);
-                logger.info("Tenant {}: Enviadas {} ubicaciones mock para ciudad {}", tenantId, mockLocations.size(), cityId);
+                webSocketHandler.broadcastRiderLocationsByCity(cityId, mockLocations);
             }
 
         } catch (Exception e) {
