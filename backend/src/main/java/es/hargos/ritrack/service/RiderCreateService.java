@@ -12,14 +12,13 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 @Service
 public class RiderCreateService {
 
     private static final Logger logger = LoggerFactory.getLogger(RiderCreateService.class);
 
+    // TODO: Eliminar este valor por defecto y obtener contract_id de tenant_settings
     @Value("${contract.id:344}")
     private Integer defaultContractId;
 
@@ -33,9 +32,6 @@ public class RiderCreateService {
     // Contador en memoria para emails (se reinicia con cada restart)
     private final AtomicInteger emailCounter = new AtomicInteger(1000);
 
-    // Patrón para extraer número del email
-    private final Pattern EMAIL_PATTERN = Pattern.compile("arendeltech\\+(\\d+)@");
-
     @Autowired
     public RiderCreateService(GlovoClient glovoClient,
                               RoosterCacheService roosterCache,
@@ -47,8 +43,9 @@ public class RiderCreateService {
 
 
     /**
-     * Genera el siguiente email disponible (coge total en cache suma 10000 + 1)
-     * arendeltech+0010523@gmail.com
+     * Genera el siguiente email disponible para el tenant.
+     * Formato: {emailDomain}+{employeeNumber}@{emailBase}
+     * Ejemplo: mycompany+0010523@gmail.com
      */
     private String generateNextEmail(Long tenantId) throws Exception {
         List<?> employees = roosterCache.getAllEmployees(tenantId);
@@ -159,7 +156,7 @@ public class RiderCreateService {
         Object result = glovoClient.crearEmpleado(tenantId, payload);
 
         // Limpiar caché para reflejar cambios
-        roosterCache.clearCache();
+        roosterCache.clearCache(tenantId);
         logger.info("Tenant {}: Rider creado exitosamente y caché actualizado", tenantId);
 
         return (Map<String, Object>) result;

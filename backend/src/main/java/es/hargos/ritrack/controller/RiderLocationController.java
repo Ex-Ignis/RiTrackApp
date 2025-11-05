@@ -341,17 +341,28 @@ public class RiderLocationController {
 
     /**
      * Envía datos de prueba via WebSocket
+     * MULTI-TENANT: Requiere tenantId del contexto autenticado
      */
     @PostMapping("/test/broadcast")
     public ResponseEntity<Map<String, Object>> testBroadcast(
             @RequestParam Integer cityId,
             @RequestParam(defaultValue = "5") Integer count) {
         try {
+            // MULTI-TENANT: Obtener tenantId del contexto
+            TenantContext.TenantInfo tenantInfo = TenantContext.getCurrentContext();
+            Long tenantId = tenantInfo != null ? tenantInfo.getFirstTenantId() : null;
+
+            if (tenantId == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Tenant ID no encontrado en contexto"));
+            }
+
             List<RiderLocationDto> testData = generateTestRiderData(count, cityId);
             webSocketHandler.broadcastRiderLocationsByCity(cityId, testData);
 
             Map<String, Object> response = new HashMap<>();
             response.put("message", "Datos de prueba enviados");
+            response.put("tenant_id", tenantId);
             response.put("city_id", cityId);
             response.put("riders_sent", count);
             response.put("active_connections", webSocketHandler.getActiveSessionsCount());

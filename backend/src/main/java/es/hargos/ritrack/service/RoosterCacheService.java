@@ -41,10 +41,20 @@ public class RoosterCacheService {
     }
 
     /**
-     * Limpia el caché manualmente si es necesario
+     * Limpia el caché de un tenant específico
+     * MULTI-TENANT: Solo invalida el cache de un tenant, no de todos
+     */
+    @CacheEvict(value = "rooster-employees", key = "#tenantId")
+    public void clearCache(Long tenantId) {
+        logger.info("Tenant {}: Caché de empleados limpiado", tenantId);
+    }
+
+    /**
+     * Limpia el caché de TODOS los tenants (usar con precaución)
+     * Solo para mantenimiento o emergencias
      */
     @CacheEvict(value = "rooster-employees", allEntries = true)
-    public void clearCache() {
-        logger.info("Caché de empleados limpiado");
+    public void clearAllTenantsCache() {
+        logger.warn("ADVERTENCIA: Caché de empleados limpiado para TODOS los tenants");
     }
 }
