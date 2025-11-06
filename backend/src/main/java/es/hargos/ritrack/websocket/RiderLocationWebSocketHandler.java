@@ -3,6 +3,8 @@ package es.hargos.ritrack.websocket;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nimbusds.jwt.JWTClaimsSet;
 import es.hargos.ritrack.dto.RiderLocationDto;
+import es.hargos.ritrack.entity.TenantEntity;
+import es.hargos.ritrack.repository.TenantRepository;
 import es.hargos.ritrack.security.JwtUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,10 +46,14 @@ public class RiderLocationWebSocketHandler implements WebSocketHandler {
     // JwtUtil para validar tokens
     private final JwtUtil jwtUtil;
 
+    // TenantRepository para convertir hargosTenantId -> id
+    private final TenantRepository tenantRepository;
+
     // Constructor que inyecta dependencias
-    public RiderLocationWebSocketHandler(ObjectMapper objectMapper, JwtUtil jwtUtil) {
+    public RiderLocationWebSocketHandler(ObjectMapper objectMapper, JwtUtil jwtUtil, TenantRepository tenantRepository) {
         this.objectMapper = objectMapper;
         this.jwtUtil = jwtUtil;
+        this.tenantRepository = tenantRepository;
     }
 
     // Executor para manejar tareas en background
@@ -166,32 +172,45 @@ public class RiderLocationWebSocketHandler implements WebSocketHandler {
                 return;
             }
 
-            // Buscar el tenant de RiTrack
-            Long tenantId = null;
+            // Buscar el tenant de RiTrack (viene hargosTenantId del JWT)
+            Long hargosTenantId = null;
             for (Map<String, Object> tenant : tenants) {
                 if ("RiTrack".equals(tenant.get("appName"))) {
                     Object tenantIdObj = tenant.get("tenantId");
                     if (tenantIdObj instanceof Number) {
-                        tenantId = ((Number) tenantIdObj).longValue();
+                        hargosTenantId = ((Number) tenantIdObj).longValue();
                     } else if (tenantIdObj instanceof String) {
-                        tenantId = Long.parseLong((String) tenantIdObj);
+                        hargosTenantId = Long.parseLong((String) tenantIdObj);
                     }
                     break;
                 }
             }
 
-            if (tenantId == null) {
+            if (hargosTenantId == null) {
                 sendMessageToSession(session, createErrorMessage("Usuario no tiene acceso a RiTrack"));
                 session.close(CloseStatus.NOT_ACCEPTABLE);
                 return;
             }
 
-            // Guardar tenantId en el mapa de sesiones
-            sessionTenantMap.put(session.getId(), tenantId);
+            // ✅ CRÍTICO: Convertir hargosTenantId -> id (para APIs de Glovo)
+            Optional<TenantEntity> tenantOpt = tenantRepository.findByHargosTenantId(hargosTenantId);
+            if (tenantOpt.isEmpty()) {
+                logger.error("No se encontró tenant con hargosTenantId: {}", hargosTenantId);
+                sendMessageToSession(session, createErrorMessage("Tenant no encontrado en RiTrack"));
+                session.close(CloseStatus.NOT_ACCEPTABLE);
+                return;
+            }
 
-            logger.info("Session {} autenticada para tenant {}", session.getId(), tenantId);
+            TenantEntity tenant = tenantOpt.get();
+            Long ritrackTenantId = tenant.getId(); // Este es el ID que usa Glovo API
+
+            // Guardar ritrackTenantId (id de la tabla tenants, no hargosTenantId) en el mapa
+            sessionTenantMap.put(session.getId(), ritrackTenantId);
+
+            logger.info("Session {} autenticada: hargosTenantId={}, ritrackTenantId={}, tenant={}",
+                    session.getId(), hargosTenantId, ritrackTenantId, tenant.getName());
             sendMessageToSession(session, createSimpleMessage("authenticated",
-                "Autenticación exitosa para tenant " + tenantId));
+                "Autenticación exitosa para tenant " + tenant.getName()));
 
         } catch (Exception e) {
             logger.error("Error en autenticación de sesión {}: {}", session.getId(), e.getMessage());
