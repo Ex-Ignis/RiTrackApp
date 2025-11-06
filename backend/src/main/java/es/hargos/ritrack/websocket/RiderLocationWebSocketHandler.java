@@ -275,14 +275,14 @@ public class RiderLocationWebSocketHandler implements WebSocketHandler {
 
     /**
      * Permite desacoplar la session de la ciudad o ciudades vinculadas
-     * MULTI-TENANT: También limpia el tenantId de la sesión
+     * MULTI-TENANT: NO borra el tenantId (se mantiene mientras la sesión esté conectada)
      */
     private void removeSessionFromAllSubscriptions(WebSocketSession session) {
         String sessionId = session.getId();
         Integer previousCityId = sessionCityMap.remove(sessionId);
 
-        // MULTI-TENANT: Limpiar tenantId
-        sessionTenantMap.remove(sessionId);
+        // MULTI-TENANT: NO limpiar tenantId aquí - solo al cerrar conexión
+        // sessionTenantMap.remove(sessionId); // ← REMOVIDO: causaba pérdida de autenticación
 
         if (previousCityId != null) {
             // Era una suscripción específica de ciudad
@@ -304,11 +304,13 @@ public class RiderLocationWebSocketHandler implements WebSocketHandler {
         logger.error("Error en transporte WebSocket para sesion {}: {}",
                 session.getId(), exception.getMessage());
         removeSessionFromAllSubscriptions(session);
+        sessionTenantMap.remove(session.getId()); // Limpiar autenticación
     }
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus closeStatus) throws Exception {
         removeSessionFromAllSubscriptions(session);
+        sessionTenantMap.remove(session.getId()); // Limpiar autenticación
         logger.info("Conexion WebSocket cerrada. ID: {}. Estado: {}. Conexiones activas: {}",
                 session.getId(), closeStatus, getActiveSessionsCount());
     }
@@ -327,12 +329,14 @@ public class RiderLocationWebSocketHandler implements WebSocketHandler {
      * @param locations Ubicaciones de riders
      */
     public void broadcastRiderLocationsByCity(Long tenantId, Integer cityId, List<RiderLocationDto> locations) {
-//        logger.info("=== BROADCAST DEBUG ===");
-//        logger.info("CityId recibido: {}", cityId);
-//        logger.info("Locations a enviar: {}", locations.size());
-//        logger.info("Sesiones en citySessions para ciudad {}: {}", cityId,
-//                citySessions.containsKey(cityId) ? citySessions.get(cityId).size() : 0);
-//        logger.info("Sesiones totales en allCitiesSessions: {}", allCitiesSessions.size());
+        logger.info("=== BROADCAST DEBUG ===");
+        logger.info("TenantId: {}", tenantId);
+        logger.info("CityId recibido: {}", cityId);
+        logger.info("Locations a enviar: {}", locations.size());
+        logger.info("Sesiones en citySessions para ciudad {}: {}", cityId,
+                citySessions.containsKey(cityId) ? citySessions.get(cityId).size() : 0);
+        logger.info("Sesiones totales en allCitiesSessions: {}", allCitiesSessions.size());
+        logger.info("SessionTenantMap: {}", sessionTenantMap);
 
         if (locations.isEmpty()) {
             logger.debug("Tenant {}, Ciudad {}: No hay ubicaciones para enviar", tenantId, cityId);
@@ -342,22 +346,34 @@ public class RiderLocationWebSocketHandler implements WebSocketHandler {
         // MULTI-TENANT: Filtrar sesiones específicas de esta ciudad que pertenecen al tenant
         CopyOnWriteArraySet<WebSocketSession> citySpecificSessions = citySessions.get(cityId);
         if (citySpecificSessions != null && !citySpecificSessions.isEmpty()) {
+            logger.info("📍 Hay {} sesiones para ciudad {}", citySpecificSessions.size(), cityId);
             Set<WebSocketSession> tenantSessions = filterSessionsByTenant(citySpecificSessions, tenantId);
+            logger.info("🔒 Después de filtrar por tenant {}: {} sesiones", tenantId, tenantSessions.size());
             if (!tenantSessions.isEmpty()) {
                 broadcastToSessions(tenantSessions, createLocationMessage(locations, cityId));
-                logger.debug("Tenant {}, Ciudad {}: Enviadas {} ubicaciones a {} sesiones",
+                logger.info("✅ Tenant {}, Ciudad {}: Enviadas {} ubicaciones a {} sesiones",
                         tenantId, cityId, locations.size(), tenantSessions.size());
+            } else {
+                logger.warn("⚠️ No hay sesiones del tenant {} para ciudad {}", tenantId, cityId);
             }
+        } else {
+            logger.info("📍 No hay sesiones suscritas a ciudad {}", cityId);
         }
 
         // MULTI-TENANT: Filtrar sesiones de todas las ciudades que pertenecen al tenant
         if (!allCitiesSessions.isEmpty()) {
+            logger.info("🌍 Hay {} sesiones suscritas a todas las ciudades", allCitiesSessions.size());
             Set<WebSocketSession> tenantSessions = filterSessionsByTenant(allCitiesSessions, tenantId);
+            logger.info("🔒 Después de filtrar por tenant {}: {} sesiones", tenantId, tenantSessions.size());
             if (!tenantSessions.isEmpty()) {
                 broadcastToSessions(tenantSessions, createLocationMessage(locations, cityId));
-                logger.debug("Tenant {}: Enviadas {} ubicaciones a {} sesiones (todas las ciudades)",
+                logger.info("✅ Tenant {}: Enviadas {} ubicaciones a {} sesiones (todas las ciudades)",
                         tenantId, locations.size(), tenantSessions.size());
+            } else {
+                logger.warn("⚠️ No hay sesiones del tenant {} en allCitiesSessions", tenantId);
             }
+        } else {
+            logger.info("🌍 No hay sesiones suscritas a todas las ciudades");
         }
     }
 

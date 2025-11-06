@@ -149,8 +149,9 @@ public class RiderLocationService {
             for (Integer cityId : activeCityIds) {
                 try {
                     List<RiderLocationDto> locations = getRiderLocationsByCity(tenantId, cityId);
-
+                    logger.info("LLEGA 1");
                     if (!locations.isEmpty()) {
+                        logger.info("LLEGA 2");
                         // Broadcast via WebSocket (MULTI-TENANT: Filtra por tenant automáticamente)
                         webSocketHandler.broadcastRiderLocationsByCity(tenantId, cityId, locations);
                         logger.info("Tenant {}, Ciudad {}: Enviadas {} ubicaciones",
@@ -196,11 +197,15 @@ public class RiderLocationService {
                     tenantId, cityId, page, PAGE_SIZE, "employee_id"
                 );
 
+                logger.info("Tenant {}, Ciudad {}, Página {}: ridersData = {}", tenantId, cityId, page, ridersData);
+                logger.info("Llega riderlocation 1");
                 if (ridersData == null) {
                     break;
                 }
+                logger.info("Llega riderlocation 2");
 
                 if (ridersData instanceof Map) {
+                    logger.info("Llega riderlocation 3");
                     @SuppressWarnings("unchecked")
                     Map<String, Object> responseMap = (Map<String, Object>) ridersData;
 
@@ -226,7 +231,7 @@ public class RiderLocationService {
                     tenantId, cityId, MAX_PAGES);
             }
 
-            logger.debug("Tenant {}, Ciudad {}: Total {} riders en {} páginas",
+            logger.info("Tenant {}, Ciudad {}: Total {} riders en {} paginas",
                 tenantId, cityId, allLocations.size(), page);
 
             return allLocations;
@@ -289,6 +294,7 @@ public class RiderLocationService {
      */
     private List<RiderLocationDto> extractLocationsFromRidersData(Object ridersData) {
         if (!(ridersData instanceof Map)) {
+            logger.info("❌ ridersData no es Map");
             return new ArrayList<>();
         }
 
@@ -296,17 +302,53 @@ public class RiderLocationService {
         Map<String, Object> responseMap = (Map<String, Object>) ridersData;
 
         @SuppressWarnings("unchecked")
-        List<Map<String, Object>> ridersList = (List<Map<String, Object>>) responseMap.get("data");
+        List<Map<String, Object>> ridersList = (List<Map<String, Object>>) responseMap.get("content");
+
+        logger.info("📦 Riders desde API (content): {}", ridersList != null ? ridersList.size() : "null");
 
         if (ridersList == null || ridersList.isEmpty()) {
+            logger.info("❌ ridersList vacío o null");
             return new ArrayList<>();
         }
 
-        return ridersList.stream()
+        List<RiderLocationDto> converted = ridersList.stream()
             .map(this::convertToRiderLocationDto)
             .filter(Objects::nonNull)
-            .filter(this::hasValidCoordinates)
             .collect(Collectors.toList());
+
+        logger.info("✅ Después de convertir: {} riders", converted.size());
+
+        // Separar riders con y sin coordenadas válidas
+        List<RiderLocationDto> withCoordinates = new ArrayList<>();
+        List<RiderLocationDto> withoutCoordinates = new ArrayList<>();
+
+        for (RiderLocationDto rider : converted) {
+            if (hasValidCoordinates(rider)) {
+                withCoordinates.add(rider);
+            } else {
+                withoutCoordinates.add(rider);
+            }
+        }
+
+        logger.info("📍 Con coordenadas válidas: {} riders", withCoordinates.size());
+
+        if (!withoutCoordinates.isEmpty()) {
+            logger.info("⚠️ SIN coordenadas válidas: {} riders", withoutCoordinates.size());
+            // Mostrar ejemplos (máximo 3)
+            int examples = Math.min(3, withoutCoordinates.size());
+            for (int i = 0; i < examples; i++) {
+                RiderLocationDto rider = withoutCoordinates.get(i);
+                logger.info("   Ejemplo {}: employeeId={}, name={}, lat={}, lon={}, status={}",
+                    i+1,
+                    rider.getEmployeeId(),
+                    rider.getFullName(),
+                    rider.getLatitude(),
+                    rider.getLongitude(),
+                    rider.getStatus());
+            }
+        }
+
+        return withCoordinates;
     }
 
     /**
