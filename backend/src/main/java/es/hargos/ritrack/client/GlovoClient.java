@@ -332,13 +332,16 @@ public class GlovoClient {
                 urlBuilder.append("sort_by=").append(sortBy);
             }
 
+            String finalUrl = urlBuilder.toString();
+
             try {
                 ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
-                    urlBuilder.toString(),
+                    finalUrl,
                     HttpMethod.GET,
                     entity,
                     new ParameterizedTypeReference<>() {}
                 );
+
                 return response.getBody();
             } catch (HttpClientErrorException.NotFound e) {
                 logger.warn("City {} not found in Live API for tenant {}", cityId, tenantId);

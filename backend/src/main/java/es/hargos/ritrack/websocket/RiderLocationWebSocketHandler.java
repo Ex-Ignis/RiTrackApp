@@ -92,12 +92,16 @@ public class RiderLocationWebSocketHandler implements WebSocketHandler {
             Map<String, Object> messageData = objectMapper.readValue(payload, Map.class);
 
             String action = (String) messageData.get("action");
+            logger.info("Procesando action '{}' de sesión {}", action, session.getId());
 
             switch (action != null ? action : "") {
                 case "authenticate":
+                    logger.info("Ejecutando handleAuthentication para sesión {}", session.getId());
                     handleAuthentication(session, messageData);
                     break;
                 case "subscribe_city":
+                    logger.info("Ejecutando handleCitySubscription para sesión {} con cityId={}",
+                        session.getId(), messageData.get("city_id"));
                     handleCitySubscription(session, messageData);
                     break;
                 case "subscribe_all":
