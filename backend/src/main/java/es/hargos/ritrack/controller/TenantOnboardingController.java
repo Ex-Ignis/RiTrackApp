@@ -3,6 +3,7 @@ package es.hargos.ritrack.controller;
 import es.hargos.ritrack.context.TenantContext;
 import es.hargos.ritrack.dto.OnboardingDto;
 import es.hargos.ritrack.dto.OnboardingStatusDto;
+import es.hargos.ritrack.dto.UpdateCredentialsRequest;
 import es.hargos.ritrack.service.TenantOnboardingService;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -272,6 +273,96 @@ public class TenantOnboardingController {
             Map<String, String> error = new HashMap<>();
             error.put("error", "Error en la validación");
             error.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
+    }
+
+    /**
+     * Actualiza las credenciales de Glovo del tenant.
+     * Endpoint separado para cambiar credenciales sensibles (clientId, keyId, pemFile).
+     *
+     * Al menos uno de los parámetros debe ser proporcionado.
+     * Las credenciales se validan con la API de Glovo antes de guardarlas.
+     *
+     * PUT /api/v1/tenant/onboarding/credentials
+     *
+     * @param pemFile Nuevo archivo .pem (opcional, solo si se cambia)
+     * @param clientId Nuevo Client ID (opcional)
+     * @param keyId Nuevo Key ID (opcional)
+     * @param companyId Nuevo Company ID (opcional)
+     * @param contractId Nuevo Contract ID (opcional)
+     * @return Success response
+     */
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
+    @PutMapping(value = "/credentials", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<?> updateCredentials(
+            @RequestParam(value = "pemFile", required = false) MultipartFile pemFile,
+            @RequestParam(value = "clientId", required = false) String clientId,
+            @RequestParam(value = "keyId", required = false) String keyId,
+            @RequestParam(value = "companyId", required = false) Integer companyId,
+            @RequestParam(value = "contractId", required = false) Integer contractId
+    ) {
+        try {
+            // Obtener tenantId del contexto
+            TenantContext.TenantInfo tenantInfo = TenantContext.getCurrentContext();
+
+            if (tenantInfo == null || tenantInfo.getFirstTenantId() == null) {
+                Map<String, String> error = new HashMap<>();
+                error.put("error", "Tenant no encontrado");
+                error.put("message", "No se pudo determinar el tenant desde el JWT");
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
+            }
+
+            Long tenantId = tenantInfo.getFirstTenantId();
+
+            // Validar que al menos un parámetro fue enviado
+            if (pemFile == null && clientId == null && keyId == null &&
+                companyId == null && contractId == null) {
+                Map<String, String> error = new HashMap<>();
+                error.put("error", "Sin cambios");
+                error.put("message", "Debe proporcionar al menos un campo para actualizar");
+                return ResponseEntity.badRequest().body(error);
+            }
+
+            logger.info("Tenant {}: Actualizando credenciales Glovo", tenantId);
+
+            // Crear DTO con datos de actualización
+            OnboardingDto updateData = new OnboardingDto();
+            updateData.setClientId(clientId);
+            updateData.setKeyId(keyId);
+            updateData.setCompanyId(companyId);
+            updateData.setContractId(contractId);
+
+            // Actualizar usando el servicio existente
+            onboardingService.updateTenantConfiguration(tenantId, updateData, pemFile);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("message", "Credenciales actualizadas correctamente");
+
+            logger.info("Tenant {}: Credenciales actualizadas exitosamente", tenantId);
+
+            return ResponseEntity.ok(response);
+
+        } catch (IllegalStateException e) {
+            logger.warn("Tenant no configurado: {}", e.getMessage());
+            Map<String, String> error = new HashMap<>();
+            error.put("error", "Tenant no configurado");
+            error.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+
+        } catch (IllegalArgumentException e) {
+            logger.error("Credenciales inválidas: {}", e.getMessage());
+            Map<String, String> error = new HashMap<>();
+            error.put("error", "Credenciales inválidas");
+            error.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+
+        } catch (Exception e) {
+            logger.error("Error actualizando credenciales: {}", e.getMessage(), e);
+            Map<String, String> error = new HashMap<>();
+            error.put("error", "Error interno");
+            error.put("message", "Ocurrió un error al actualizar las credenciales");
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
         }
     }
