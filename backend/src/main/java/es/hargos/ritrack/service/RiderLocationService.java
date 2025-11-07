@@ -149,12 +149,10 @@ public class RiderLocationService {
             for (Integer cityId : activeCityIds) {
                 try {
                     List<RiderLocationDto> locations = getRiderLocationsByCity(tenantId, cityId);
-                    logger.info("LLEGA 1");
                     if (!locations.isEmpty()) {
-                        logger.info("LLEGA 2");
                         // Broadcast via WebSocket (MULTI-TENANT: Filtra por tenant automáticamente)
                         webSocketHandler.broadcastRiderLocationsByCity(tenantId, cityId, locations);
-                        logger.info("Tenant {}, Ciudad {}: Enviadas {} ubicaciones",
+                        logger.debug("Tenant {}, Ciudad {}: Enviadas {} ubicaciones",
                             tenantName, cityId, locations.size());
                     }
 
@@ -197,15 +195,12 @@ public class RiderLocationService {
                     tenantId, cityId, page, PAGE_SIZE, "employee_id"
                 );
 
-                logger.info("Tenant {}, Ciudad {}, Página {}: ridersData = {}", tenantId, cityId, page, ridersData);
-                logger.info("Llega riderlocation 1");
+                logger.debug("Tenant {}, Ciudad {}, Página {}: ridersData = {}", tenantId, cityId, page, ridersData);
                 if (ridersData == null) {
                     break;
                 }
-                logger.info("Llega riderlocation 2");
 
                 if (ridersData instanceof Map) {
-                    logger.info("Llega riderlocation 3");
                     @SuppressWarnings("unchecked")
                     Map<String, Object> responseMap = (Map<String, Object>) ridersData;
 
@@ -231,7 +226,7 @@ public class RiderLocationService {
                     tenantId, cityId, MAX_PAGES);
             }
 
-            logger.info("Tenant {}, Ciudad {}: Total {} riders en {} paginas",
+            logger.debug("Tenant {}, Ciudad {}: Total {} riders en {} paginas",
                 tenantId, cityId, allLocations.size(), page);
 
             return allLocations;
@@ -304,10 +299,9 @@ public class RiderLocationService {
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> ridersList = (List<Map<String, Object>>) responseMap.get("content");
 
-        logger.info("📦 Riders desde API (content): {}", ridersList != null ? ridersList.size() : "null");
+        logger.debug("Riders desde API (content): {}", ridersList != null ? ridersList.size() : "null");
 
         if (ridersList == null || ridersList.isEmpty()) {
-            logger.info("❌ ridersList vacío o null");
             return new ArrayList<>();
         }
 
@@ -316,39 +310,20 @@ public class RiderLocationService {
             .filter(Objects::nonNull)
             .collect(Collectors.toList());
 
-        logger.info("✅ Después de convertir: {} riders", converted.size());
+        logger.debug("✅ Procesados {} riders (incluyendo riders sin coordenadas)", converted.size());
 
-        // Separar riders con y sin coordenadas válidas
-        List<RiderLocationDto> withCoordinates = new ArrayList<>();
-        List<RiderLocationDto> withoutCoordinates = new ArrayList<>();
+        // Contar riders con y sin coordenadas para logging
+        long withCoordinates = converted.stream()
+            .filter(this::hasValidCoordinates)
+            .count();
+        long withoutCoordinates = converted.size() - withCoordinates;
 
-        for (RiderLocationDto rider : converted) {
-            if (hasValidCoordinates(rider)) {
-                withCoordinates.add(rider);
-            } else {
-                withoutCoordinates.add(rider);
-            }
+        if (withoutCoordinates > 0) {
+            logger.debug("📊 Estadísticas: {} con coordenadas, {} sin coordenadas",
+                withCoordinates, withoutCoordinates);
         }
 
-        logger.info("📍 Con coordenadas válidas: {} riders", withCoordinates.size());
-
-        if (!withoutCoordinates.isEmpty()) {
-            logger.info("⚠️ SIN coordenadas válidas: {} riders", withoutCoordinates.size());
-            // Mostrar ejemplos (máximo 3)
-            int examples = Math.min(3, withoutCoordinates.size());
-            for (int i = 0; i < examples; i++) {
-                RiderLocationDto rider = withoutCoordinates.get(i);
-                logger.info("   Ejemplo {}: employeeId={}, name={}, lat={}, lon={}, status={}",
-                    i+1,
-                    rider.getEmployeeId(),
-                    rider.getFullName(),
-                    rider.getLatitude(),
-                    rider.getLongitude(),
-                    rider.getStatus());
-            }
-        }
-
-        return withCoordinates;
+        return converted; // ✅ Retornar TODOS los riders, incluso sin coordenadas
     }
 
     /**
@@ -384,8 +359,15 @@ public class RiderLocationService {
                 dto.setVehicleTypeName((String) vehicleType.get("name"));
             }
 
-            // Delivery data
-            dto.setHasActiveDelivery((Boolean) riderMap.get("has_active_delivery"));
+            // Delivery data - CORREGIDO: La API v1 usa deliveries_info.has_active_deliveries
+            @SuppressWarnings("unchecked")
+            Map<String, Object> deliveriesInfo = (Map<String, Object>) riderMap.get("deliveries_info");
+            if (deliveriesInfo != null) {
+                Boolean hasActiveDeliveries = (Boolean) deliveriesInfo.get("has_active_deliveries");
+                dto.setHasActiveDelivery(hasActiveDeliveries != null && hasActiveDeliveries);
+            } else {
+                dto.setHasActiveDelivery(false);
+            }
 
             return dto;
 

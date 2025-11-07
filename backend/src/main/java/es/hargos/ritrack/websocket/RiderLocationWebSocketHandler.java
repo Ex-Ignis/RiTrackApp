@@ -393,7 +393,7 @@ public class RiderLocationWebSocketHandler implements WebSocketHandler {
                 logger.info("✅ Tenant {}: Enviadas {} ubicaciones a {} sesiones (todas las ciudades)",
                         tenantId, locations.size(), tenantSessions.size());
             } else {
-                logger.warn("⚠️ No hay sesiones del tenant {} en allCitiesSessions", tenantId);
+                logger.debug("⚠️ No hay sesiones del tenant {} en allCitiesSessions", tenantId);
             }
         } else {
             logger.info("🌍 No hay sesiones suscritas a todas las ciudades");
