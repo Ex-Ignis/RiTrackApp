@@ -172,8 +172,15 @@ public class RiderLocationService {
     // MÉTODOS PÚBLICOS - UBICACIONES POR CIUDAD
     // ===============================================
 
+    // Límite de seguridad: 4 req/s (deja margen de 1 req/s del límite de 5 req/s de Glovo Live API)
+    private static final int SAFE_REQ_PER_SECOND = 4;
+    private static final long THROTTLE_DELAY_MS = 1000 / SAFE_REQ_PER_SECOND; // 250ms
+
     /**
      * Obtiene ubicaciones actuales de riders para una ciudad específica de un tenant.
+     *
+     * THROTTLING: Respeta límite de 4 req/s (margen de seguridad del límite de 5 req/s de Glovo).
+     * Aplica delay de 250ms entre páginas para garantizar que no se exceda el rate limit.
      *
      * @param tenantId Tenant ID
      * @param cityId ID de la ciudad
@@ -190,6 +197,8 @@ public class RiderLocationService {
             final int MAX_PAGES = 50; // Límite de seguridad
 
             while (hasMorePages && page < MAX_PAGES) {
+                long startTime = System.currentTimeMillis();
+
                 // Llamada a GlovoClient con tenantId
                 Object ridersData = glovoClient.obtenerRidersPorCiudad(
                     tenantId, cityId, page, PAGE_SIZE, "employee_id"
@@ -216,6 +225,24 @@ public class RiderLocationService {
                         hasMorePages = false;
                     }
                     page++;
+
+                    // THROTTLING: Esperar entre páginas para respetar límite de 4 req/s
+                    if (hasMorePages && page < MAX_PAGES) {
+                        long elapsed = System.currentTimeMillis() - startTime;
+                        long sleepTime = THROTTLE_DELAY_MS - elapsed;
+
+                        if (sleepTime > 0) {
+                            try {
+                                logger.debug("Tenant {}, Ciudad {}: Throttling {}ms antes de página {}",
+                                    tenantId, cityId, sleepTime, page);
+                                Thread.sleep(sleepTime);
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                logger.warn("Tenant {}, Ciudad {}: Throttling interrumpido", tenantId, cityId);
+                                hasMorePages = false;
+                            }
+                        }
+                    }
                 } else {
                     hasMorePages = false;
                 }

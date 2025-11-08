@@ -2,6 +2,7 @@ package es.hargos.ritrack.client;
 
 import es.hargos.ritrack.entity.GlovoCredentialsEntity;
 import es.hargos.ritrack.repository.GlovoCredentialsRepository;
+import es.hargos.ritrack.service.ApiMonitoringService;
 import es.hargos.ritrack.service.RateLimitService;
 import es.hargos.ritrack.service.TenantTokenService;
 import org.slf4j.Logger;
@@ -44,6 +45,9 @@ public class GlovoClient {
     @Autowired
     private RateLimitService rateLimitService;
 
+    @Autowired
+    private ApiMonitoringService monitoringService;
+
     private final RestTemplate restTemplate = new RestTemplate();
 
     /**
@@ -58,14 +62,35 @@ public class GlovoClient {
     }
 
     /**
-     * Execute HTTP request with rate limiting
+     * Execute HTTP request with rate limiting and 429 monitoring
      */
     private <T> T executeWithRateLimit(Long tenantId,
                                         RateLimitService.RequestPriority priority,
                                         HttpRequestExecutor<T> executor) throws Exception {
+        return executeWithRateLimit(tenantId, priority, executor, "Unknown", "GlovoClient");
+    }
+
+    /**
+     * Execute HTTP request with rate limiting, 429 monitoring, and metadata
+     */
+    private <T> T executeWithRateLimit(Long tenantId,
+                                        RateLimitService.RequestPriority priority,
+                                        HttpRequestExecutor<T> executor,
+                                        String endpoint,
+                                        String callingService) throws Exception {
         return rateLimitService.executeWithRateLimit(tenantId, priority, () -> {
             try {
                 return executor.execute();
+            } catch (RateLimitService.RateLimitExceededException e) {
+                // Registrar 429 en monitoreo
+                monitoringService.recordRateLimitError(tenantId, endpoint, callingService);
+                throw new RuntimeException(e);
+            } catch (HttpClientErrorException e) {
+                // Capturar 429s que vienen directamente de la API
+                if (e.getStatusCode() == HttpStatus.TOO_MANY_REQUESTS) {
+                    monitoringService.recordRateLimitError(tenantId, endpoint, callingService);
+                }
+                throw new RuntimeException(e);
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }

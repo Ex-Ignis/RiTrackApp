@@ -93,20 +93,30 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     /**
      * Authenticate user and populate TenantContext.
      *
-     * New flow with X-Tenant-Id header:
-     * 1. Extract tenants from JWT
-     * 2. Read X-Tenant-Id header from request
-     * 3. Validate header value is in JWT's tenant list
-     * 4. Find or create tenant in RiTrack
-     * 5. Set TenantContext with selected tenant
+     * Flow:
+     * 1. Check if user has global role (SUPER_ADMIN)
+     * 2. If SUPER_ADMIN, authenticate without tenants
+     * 3. Otherwise, extract tenants from JWT
+     * 4. Read X-Tenant-Id header from request
+     * 5. Validate header value is in JWT's tenant list
+     * 6. Find or create tenant in RiTrack
+     * 7. Set TenantContext with selected tenant
      */
     private void authenticateUser(String jwt, HttpServletRequest request) {
         try {
-            // 1. Extract tenants from JWT
+            // 1. Check for global role (SUPER_ADMIN)
+            String globalRole = jwtUtil.extractGlobalRole(jwt);
+
+            if ("SUPER_ADMIN".equals(globalRole)) {
+                setupSuperAdminContext(jwt, request);
+                return;
+            }
+
+            // 2. Extract tenants from JWT (for normal users)
             List<JwtTenantInfo> jwtTenants = jwtUtil.extractTenants(jwt);
 
             if (jwtTenants.isEmpty()) {
-                log.warn("No RiTrack tenants found in JWT");
+                log.warn("No RiTrack tenants found in JWT and user is not SUPER_ADMIN");
                 return;
             }
 
@@ -149,6 +159,30 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         } catch (Exception e) {
             log.error("Error during authentication", e);
         }
+    }
+
+    /**
+     * Setup authentication for SUPER_ADMIN (no tenant context needed)
+     */
+    private void setupSuperAdminContext(String jwt, HttpServletRequest request) {
+        // Extract user info from JWT
+        Long userId = jwtUtil.getUserIdFromToken(jwt);
+        String email = jwtUtil.getEmailFromToken(jwt);
+
+        // Set Spring Security authentication with SUPER_ADMIN role
+        List<SimpleGrantedAuthority> authorities = Collections.singletonList(
+                new SimpleGrantedAuthority("ROLE_SUPER_ADMIN")
+        );
+
+        UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+                email,
+                null,
+                authorities
+        );
+        authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+
+        log.debug("SUPER_ADMIN {} authenticated without tenant context", email);
     }
 
     /**

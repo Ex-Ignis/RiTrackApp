@@ -148,6 +148,47 @@ public class JwtUtil {
     }
 
     /**
+     * Extract global role from JWT token (ej: SUPER_ADMIN).
+     * Este rol es global y no está asociado a ningún tenant.
+     *
+     * Busca el rol en dos ubicaciones:
+     * 1. Claim "role" en nivel superior del JWT
+     * 2. tenants[0].role si tenants[0].appName = "SYSTEM"
+     *
+     * @param token JWT token string
+     * @return Global role or null if not present
+     */
+    public String extractGlobalRole(String token) {
+        try {
+            SignedJWT signedJWT = SignedJWT.parse(token);
+            JWTClaimsSet claims = signedJWT.getJWTClaimsSet();
+
+            // Opción 1: Buscar claim "role" en nivel superior
+            String globalRole = claims.getStringClaim("role");
+            if (globalRole != null) {
+                return globalRole;
+            }
+
+            // Opción 2: Buscar en tenants[0] si appName = "SYSTEM"
+            List<Map<String, Object>> tenants = (List<Map<String, Object>>) claims.getClaim("tenants");
+            if (tenants != null && !tenants.isEmpty()) {
+                Map<String, Object> firstTenant = tenants.get(0);
+                String appName = (String) firstTenant.get("appName");
+
+                if ("SYSTEM".equalsIgnoreCase(appName)) {
+                    return (String) firstTenant.get("role");
+                }
+            }
+
+            return null;
+
+        } catch (Exception e) {
+            log.debug("No global role found in JWT");
+            return null;
+        }
+    }
+
+    /**
      * Extract tenants from JWT token as a list of JwtTenantInfo objects.
      * Filters only tenants with appName "riders" or "RiTrack".
      *

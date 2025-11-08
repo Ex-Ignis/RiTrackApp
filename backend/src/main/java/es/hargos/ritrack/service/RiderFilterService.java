@@ -327,8 +327,15 @@ public class RiderFilterService {
         return cityRiders;
     }
 
+    // Throttling para respetar límite de Live API: 4 req/s (margen de seguridad)
+    private static final int SAFE_REQ_PER_SECOND = 4;
+    private static final long THROTTLE_DELAY_MS = 1000 / SAFE_REQ_PER_SECOND; // 250ms
+
     /**
-     * Obtiene todos los riders de una ciudad desde Live API
+     * Obtiene todos los riders de una ciudad desde Live API con throttling.
+     *
+     * THROTTLING: Respeta límite de 4 req/s (margen de seguridad del límite de 5 req/s de Glovo).
+     * Aplica delay de 250ms entre páginas para garantizar que no se exceda el rate limit.
      */
     private List<Map<String, Object>> getAllRidersFromCity(Long tenantId, Integer cityId) throws Exception {
         List<Map<String, Object>> allRiders = new ArrayList<>();
@@ -336,6 +343,8 @@ public class RiderFilterService {
         boolean hasMore = true;
 
         while (hasMore && page < 50) {
+            long startTime = System.currentTimeMillis();
+
             Object response = glovoClient.obtenerRidersPorCiudad(tenantId, cityId, page, 100, "employee_id");
 
             if (response instanceof Map) {
@@ -350,6 +359,24 @@ public class RiderFilterService {
                     Boolean isLast = (Boolean) responseMap.get("is_last");
                     hasMore = isLast != null && !isLast;
                     page++;
+
+                    // THROTTLING: Esperar entre páginas para respetar límite de 4 req/s
+                    if (hasMore && page < 50) {
+                        long elapsed = System.currentTimeMillis() - startTime;
+                        long sleepTime = THROTTLE_DELAY_MS - elapsed;
+
+                        if (sleepTime > 0) {
+                            try {
+                                logger.debug("Tenant {}, Ciudad {}: Throttling {}ms antes de página {}",
+                                    tenantId, cityId, sleepTime, page);
+                                Thread.sleep(sleepTime);
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                logger.warn("Tenant {}, Ciudad {}: Throttling interrumpido", tenantId, cityId);
+                                hasMore = false;
+                            }
+                        }
+                    }
                 } else {
                     hasMore = false;
                 }
