@@ -111,29 +111,6 @@ BEGIN
     -- Set search path
     EXECUTE format('SET search_path TO %I, public', tenant_schema_name);
 
-    -- Create riders table
-    EXECUTE format('
-        CREATE TABLE IF NOT EXISTS %I.riders (
-            id BIGSERIAL PRIMARY KEY,
-            employee_id VARCHAR(255) UNIQUE NOT NULL,
-            full_name VARCHAR(255) NOT NULL,
-            email VARCHAR(255) UNIQUE NOT NULL,
-            phone VARCHAR(50),
-            dni VARCHAR(20),
-            city_id INTEGER NOT NULL,
-            city_name VARCHAR(255),
-            contract_type VARCHAR(100),
-            status VARCHAR(50),
-            vehicle_type INTEGER,
-            vehicle_type_name VARCHAR(100),
-            starting_point_id INTEGER,
-            starting_point_name VARCHAR(255),
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_synced_at TIMESTAMP
-        )
-    ', tenant_schema_name);
-
     -- Create rider_metrics_csv table (imported from CSV files)
     EXECUTE format('
         CREATE TABLE IF NOT EXISTS %I.rider_metrics_csv (
@@ -159,30 +136,6 @@ BEGIN
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
             UNIQUE (employee_id, date)
-        )
-    ', tenant_schema_name);
-
-    -- Create daily_deliveries table (synchronized from Glovo Live API)
-    EXECUTE format('
-        CREATE TABLE IF NOT EXISTS %I.daily_deliveries (
-            id BIGSERIAL PRIMARY KEY,
-            rider_id VARCHAR(255) NOT NULL,
-            date DATE NOT NULL,
-            completed_deliveries INTEGER,
-            cancelled_deliveries INTEGER,
-            accepted_deliveries INTEGER,
-            total_worked_seconds INTEGER,
-            total_break_seconds INTEGER,
-            last_session_deliveries INTEGER,
-            last_session_cancelled INTEGER,
-            last_session_worked_seconds INTEGER,
-            utilization_rate DOUBLE PRECISION,
-            acceptance_rate DOUBLE PRECISION,
-            last_update_time TIMESTAMP,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-            UNIQUE (rider_id, date)
         )
     ', tenant_schema_name);
 
@@ -256,28 +209,12 @@ BEGIN
         )
     ', tenant_schema_name);
 
-    -- Create indexes for riders
-    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_riders_employee_id ON %I.riders(employee_id)',
-        tenant_schema_name, tenant_schema_name);
-    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_riders_city_id ON %I.riders(city_id)',
-        tenant_schema_name, tenant_schema_name);
-    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_riders_status ON %I.riders(status)',
-        tenant_schema_name, tenant_schema_name);
-    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_riders_email ON %I.riders(email)',
-        tenant_schema_name, tenant_schema_name);
-
     -- Create indexes for metrics
     EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_metrics_csv_employee_date ON %I.rider_metrics_csv(employee_id, date)',
         tenant_schema_name, tenant_schema_name);
     EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_metrics_csv_date ON %I.rider_metrics_csv(date DESC)',
         tenant_schema_name, tenant_schema_name);
     EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_metrics_csv_city_date ON %I.rider_metrics_csv(city_id, date)',
-        tenant_schema_name, tenant_schema_name);
-
-    -- Create indexes for daily_deliveries
-    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_daily_deliveries_rider_date ON %I.daily_deliveries(rider_id, date)',
-        tenant_schema_name, tenant_schema_name);
-    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_daily_deliveries_date ON %I.daily_deliveries(date DESC)',
         tenant_schema_name, tenant_schema_name);
 
     -- Create indexes for rider_metrics_daily
