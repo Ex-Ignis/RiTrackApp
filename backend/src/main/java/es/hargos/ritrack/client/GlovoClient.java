@@ -232,7 +232,7 @@ public class GlovoClient {
 
     /**
      * Assign starting points to employee
-     * PUT /v3/external/employees/{employee_id}/starting-points
+     * POST /v3/external/employees/{employee_id}/starting-points
      */
     public Object asignarPuntosInicioAEmpleado(Long tenantId, int employeeId,
                                                 Map<String, Object> startingPointsData) throws Exception {
@@ -250,7 +250,7 @@ public class GlovoClient {
 
             ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
                 url,
-                HttpMethod.PUT,
+                HttpMethod.POST,
                 entity,
                 new ParameterizedTypeReference<>() {}
             );
