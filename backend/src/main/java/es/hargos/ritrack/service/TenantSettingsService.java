@@ -1,8 +1,10 @@
 package es.hargos.ritrack.service;
 
 import es.hargos.ritrack.dto.UpdateSettingsRequest;
+import es.hargos.ritrack.entity.GlovoCredentialsEntity;
 import es.hargos.ritrack.entity.TenantEntity;
 import es.hargos.ritrack.entity.TenantSettingsEntity;
+import es.hargos.ritrack.repository.GlovoCredentialsRepository;
 import es.hargos.ritrack.repository.TenantRepository;
 import es.hargos.ritrack.repository.TenantSettingsRepository;
 import org.slf4j.Logger;
@@ -26,11 +28,14 @@ public class TenantSettingsService {
     private static final Logger logger = LoggerFactory.getLogger(TenantSettingsService.class);
     private final TenantSettingsRepository settingsRepository;
     private final TenantRepository tenantRepository;
+    private final GlovoCredentialsRepository credentialsRepository;
 
     public TenantSettingsService(TenantSettingsRepository settingsRepository,
-                                 TenantRepository tenantRepository) {
+                                 TenantRepository tenantRepository,
+                                 GlovoCredentialsRepository credentialsRepository) {
         this.settingsRepository = settingsRepository;
         this.tenantRepository = tenantRepository;
+        this.credentialsRepository = credentialsRepository;
     }
 
     /**
@@ -111,6 +116,26 @@ public class TenantSettingsService {
                     tenantId, e.getMessage());
             return List.of(5, 1, 3, 2); // Fallback
         }
+    }
+
+    /**
+     * Obtiene contract ID para riders desde glovo_credentials
+     */
+    public Integer getContractId(Long tenantId) {
+        GlovoCredentialsEntity credentials = credentialsRepository.findByTenantId(tenantId)
+                .orElseThrow(() -> {
+                    logger.error("Tenant {}: Glovo credentials not found", tenantId);
+                    return new IllegalStateException("Credenciales de Glovo no encontradas para tenant " + tenantId);
+                });
+
+        Integer contractId = credentials.getContractId();
+        if (contractId == null) {
+            logger.error("Tenant {}: contract_id is null in glovo_credentials", tenantId);
+            throw new IllegalStateException("Contract ID no configurado en credenciales para tenant " + tenantId);
+        }
+
+        logger.debug("Tenant {}: contract_id from glovo_credentials: {}", tenantId, contractId);
+        return contractId;
     }
 
     // ========================================

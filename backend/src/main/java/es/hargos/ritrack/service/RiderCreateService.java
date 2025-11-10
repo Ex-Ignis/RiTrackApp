@@ -18,10 +18,6 @@ public class RiderCreateService {
 
     private static final Logger logger = LoggerFactory.getLogger(RiderCreateService.class);
 
-    // TODO: Eliminar este valor por defecto y obtener contract_id de tenant_settings
-    @Value("${contract.id:344}")
-    private Integer defaultContractId;
-
     @Value("#{${rider.default.starting-points:T(java.util.Collections).emptyMap()}}")
     private Map<String, List<Integer>> defaultStartingPointsByCity;
 
@@ -200,11 +196,11 @@ public class RiderCreateService {
         // ===== CONTRATO (REQUERIDO) =====
         Map<String, Object> contractPayload = new HashMap<>();
 
-        // contract_id: usar el proporcionado o el valor por defecto
+        // contract_id: usar el proporcionado o el valor por defecto del tenant
         Integer contractId = data.getContract().getContractId();
         if (contractId == null || contractId <= 0) {
-            contractId = defaultContractId;
-            logger.info("Contract ID asignado por defecto: {}", contractId);
+            contractId = tenantSettingsService.getContractId(tenantId);
+            logger.info("Tenant {}: Contract ID obtenido desde tenant_settings: {}", tenantId, contractId);
         }
         contractPayload.put("contract_id", contractId);
 
