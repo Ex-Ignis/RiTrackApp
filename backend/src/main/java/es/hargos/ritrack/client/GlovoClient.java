@@ -433,7 +433,7 @@ public class GlovoClient {
 
     /**
      * Get starting points by city
-     * GET /v3/external/cities/{city_id}/starting-points
+     * GET /v3/external/starting-points?city_id={city_id}
      */
     public List<Object> getStartingPointsByCity(Long tenantId, Integer cityId) throws Exception {
         return executeWithRateLimit(tenantId, RateLimitService.RequestPriority.LOW, () -> {
@@ -444,8 +444,7 @@ public class GlovoClient {
             headers.setBearerAuth(token);
             HttpEntity<String> entity = new HttpEntity<>(headers);
 
-            String url = credentials.getRoosterBaseUrl() + "/v3/external/cities/" +
-                         cityId + "/starting-points";
+            String url = credentials.getRoosterBaseUrl() + "/v3/external/starting-points?city_id=" + cityId;
 
             ResponseEntity<List<Object>> response = restTemplate.exchange(
                 url,

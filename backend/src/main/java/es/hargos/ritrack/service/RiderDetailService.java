@@ -607,17 +607,15 @@ public class RiderDetailService {
             @SuppressWarnings("unchecked")
             Map<String, Object> dataMap = (Map<String, Object>) roosterData;
 
-            // Extraer city_id del contrato activo
-            @SuppressWarnings("unchecked")
-            Map<String, Object> activeContract = (Map<String, Object>) dataMap.get("active_contract");
+            // ✅ Extraer city_id del nivel raíz
+            Integer cityId = (Integer) dataMap.get("city_id");
 
-            if (activeContract != null) {
-                Integer cityId = (Integer) activeContract.get("city_id");
+            if (cityId != null) {
                 logger.info("Tenant {}: Rider {} tiene cityId: {}", tenantId, riderId, cityId);
                 return cityId;
             }
 
-            logger.warn("Tenant {}: Rider {} no tiene contrato activo", tenantId, riderId);
+            logger.warn("Tenant {}: Rider {} no tiene city_id", tenantId, riderId);
             return null;
 
         } catch (Exception e) {
