@@ -110,7 +110,7 @@ public class GlovoClient {
      * Get all employees for a tenant
      * GET /v3/external/employees
      */
-    public List<?> obtenerEmpleados(Long tenantId) throws Exception {
+    public List<?> getEmployees(Long tenantId) throws Exception {
         return executeWithRateLimit(tenantId, RateLimitService.RequestPriority.HIGH, () -> {
             GlovoCredentialsEntity credentials = getCredentials(tenantId);
             String token = tokenService.getAccessToken(tenantId);
@@ -136,7 +136,7 @@ public class GlovoClient {
      * Get employee by ID
      * GET /v3/external/employees/{employee_id}
      */
-    public Object obtenerEmpleadoPorId(Long tenantId, int id) throws Exception {
+    public Object getEmployeeById(Long tenantId, int id) throws Exception {
         return executeWithRateLimit(tenantId, RateLimitService.RequestPriority.HIGH, () -> {
             GlovoCredentialsEntity credentials = getCredentials(tenantId);
             String token = tokenService.getAccessToken(tenantId);
@@ -165,7 +165,7 @@ public class GlovoClient {
      * Update employee
      * PUT /v3/external/employees/{employee_id}
      */
-    public Object actualizarEmpleado(Long tenantId, int employeeId, Map<String, Object> updateData) throws Exception {
+    public Object updateEmployee(Long tenantId, int employeeId, Map<String, Object> updateData) throws Exception {
         return executeWithRateLimit(tenantId, RateLimitService.RequestPriority.HIGH, () -> {
             GlovoCredentialsEntity credentials = getCredentials(tenantId);
             String token = tokenService.getAccessToken(tenantId);
@@ -207,7 +207,7 @@ public class GlovoClient {
      * Create employee
      * POST /v3/external/employees
      */
-    public Object crearEmpleado(Long tenantId, Map<String, Object> employeeData) throws Exception {
+    public Object createEmployee(Long tenantId, Map<String, Object> employeeData) throws Exception {
         return executeWithRateLimit(tenantId, RateLimitService.RequestPriority.HIGH, () -> {
             GlovoCredentialsEntity credentials = getCredentials(tenantId);
             String token = tokenService.getAccessToken(tenantId);
@@ -234,7 +234,7 @@ public class GlovoClient {
      * Assign starting points to employee
      * POST /v3/external/employees/{employee_id}/starting-points
      */
-    public Object asignarPuntosInicioAEmpleado(Long tenantId, int employeeId,
+    public Object assignStartingPointsToEmployee(Long tenantId, int employeeId,
                                                 Map<String, Object> startingPointsData) throws Exception {
         return executeWithRateLimit(tenantId, RateLimitService.RequestPriority.HIGH, () -> {
             GlovoCredentialsEntity credentials = getCredentials(tenantId);
@@ -263,7 +263,7 @@ public class GlovoClient {
      * Assign vehicles to employee
      * PUT /v3/external/employees/{employee_id}/vehicle-types
      */
-    public Object asignarVehiculosAEmpleado(Long tenantId, int employeeId,
+    public Object assignVehiclesToEmployee(Long tenantId, int employeeId,
                                              Map<String, Object> vehicleData) throws Exception {
         return executeWithRateLimit(tenantId, RateLimitService.RequestPriority.HIGH, () -> {
             GlovoCredentialsEntity credentials = getCredentials(tenantId);
@@ -296,7 +296,7 @@ public class GlovoClient {
      * Get rider live data
      * GET /v2/external/rider/{rider_id}
      */
-    public Object obtenerRiderLiveData(Long tenantId, int riderId) throws Exception {
+    public Object getRiderLiveData(Long tenantId, int riderId) throws Exception {
         return executeWithRateLimit(tenantId, RateLimitService.RequestPriority.MEDIUM, () -> {
             GlovoCredentialsEntity credentials = getCredentials(tenantId);
             String token = tokenService.getAccessToken(tenantId);
@@ -326,16 +326,16 @@ public class GlovoClient {
      * Get riders by city
      * GET /v1/external/city/{city_id}/riders
      */
-    public Object obtenerRidersPorCiudad(Long tenantId, Integer cityId) throws Exception {
-        return obtenerRidersPorCiudad(tenantId, cityId, null, 100, "id");
+    public Object getRidersByCity(Long tenantId, Integer cityId) throws Exception {
+        return getRidersByCity(tenantId, cityId, null, 100, "id");
     }
 
     /**
      * Get riders by city with pagination
      * GET /v1/external/city/{city_id}/riders
      */
-    public Object obtenerRidersPorCiudad(Long tenantId, Integer cityId,
-                                          Integer page, Integer size, String sortBy) throws Exception {
+    public Object getRidersByCity(Long tenantId, Integer cityId,
+                                   Integer page, Integer size, String sortBy) throws Exception {
         return executeWithRateLimit(tenantId, RateLimitService.RequestPriority.MEDIUM, () -> {
             GlovoCredentialsEntity credentials = getCredentials(tenantId);
             String token = tokenService.getAccessToken(tenantId);
@@ -383,7 +383,7 @@ public class GlovoClient {
      * Get contracts
      * GET /v3/external/contracts
      */
-    public List<Object> obtenerContratos(Long tenantId) throws Exception {
+    public List<Object> getContracts(Long tenantId) throws Exception {
         return executeWithRateLimit(tenantId, RateLimitService.RequestPriority.LOW, () -> {
             GlovoCredentialsEntity credentials = getCredentials(tenantId);
             String token = tokenService.getAccessToken(tenantId);
@@ -409,7 +409,7 @@ public class GlovoClient {
      * Get vehicle types
      * GET /v3/external/vehicle-types
      */
-    public List<Object> obtenerTiposVehiculos(Long tenantId) throws Exception {
+    public List<Object> getVehicleTypes(Long tenantId) throws Exception {
         return executeWithRateLimit(tenantId, RateLimitService.RequestPriority.LOW, () -> {
             GlovoCredentialsEntity credentials = getCredentials(tenantId);
             String token = tokenService.getAccessToken(tenantId);
@@ -435,7 +435,7 @@ public class GlovoClient {
      * Get starting points by city
      * GET /v3/external/cities/{city_id}/starting-points
      */
-    public List<Object> obtenerPuntosInicioPorCiudad(Long tenantId, Integer cityId) throws Exception {
+    public List<Object> getStartingPointsByCity(Long tenantId, Integer cityId) throws Exception {
         return executeWithRateLimit(tenantId, RateLimitService.RequestPriority.LOW, () -> {
             GlovoCredentialsEntity credentials = getCredentials(tenantId);
             String token = tokenService.getAccessToken(tenantId);
@@ -465,14 +465,14 @@ public class GlovoClient {
     /**
      * Get all riders from a city (handles pagination automatically)
      */
-    public List<Map<String, Object>> obtenerTodosLosRidersDeCiudad(Long tenantId, Integer cityId)
+    public List<Map<String, Object>> getAllRidersFromCity(Long tenantId, Integer cityId)
             throws Exception {
         List<Map<String, Object>> allRiders = new ArrayList<>();
         Integer page = 0;
         Integer size = 100;
 
         while (true) {
-            Object response = obtenerRidersPorCiudad(tenantId, cityId, page, size, "id");
+            Object response = getRidersByCity(tenantId, cityId, page, size, "id");
 
             if (response instanceof Map) {
                 @SuppressWarnings("unchecked")
@@ -511,12 +511,12 @@ public class GlovoClient {
     /**
      * Get all riders from all configured cities for a tenant
      */
-    public Map<Integer, List<Object>> obtenerTodosLosRiders(Long tenantId, List<Integer> activeCityIds) throws Exception {
+    public Map<Integer, List<Object>> getAllRiders(Long tenantId, List<Integer> activeCityIds) throws Exception {
         Map<Integer, List<Object>> ridersPorCiudad = new HashMap<>();
 
         for (Integer cityId : activeCityIds) {
             try {
-                List<Map<String, Object>> riders = obtenerTodosLosRidersDeCiudad(tenantId, cityId);
+                List<Map<String, Object>> riders = getAllRidersFromCity(tenantId, cityId);
                 ridersPorCiudad.put(cityId, new ArrayList<>(riders));
                 logger.info("Tenant {}: Obtenidos {} riders de ciudad {}",
                     tenantId, riders.size(), cityId);
@@ -536,9 +536,9 @@ public class GlovoClient {
     /**
      * Check if tenant credentials are valid
      */
-    public boolean verificarEstadoAPI(Long tenantId) {
+    public boolean checkAPIStatus(Long tenantId) {
         try {
-            obtenerEmpleados(tenantId);
+            getEmployees(tenantId);
             return true;
         } catch (Exception e) {
             logger.error("API verification failed for tenant {}: {}", tenantId, e.getMessage());
@@ -549,9 +549,9 @@ public class GlovoClient {
     /**
      * Check if Live API is working for a city
      */
-    public boolean verificarEstadoAPILive(Long tenantId, Integer cityId) {
+    public boolean checkLiveAPIStatus(Long tenantId, Integer cityId) {
         try {
-            obtenerRidersPorCiudad(tenantId, cityId);
+            getRidersByCity(tenantId, cityId);
             return true;
         } catch (Exception e) {
             logger.error("Live API verification failed for tenant {} city {}: {}",
@@ -563,9 +563,9 @@ public class GlovoClient {
     /**
      * Check if city has active riders
      */
-    public boolean ciudadTieneRidersActivos(Long tenantId, Integer cityId) {
+    public boolean cityHasActiveRiders(Long tenantId, Integer cityId) {
         try {
-            Object response = obtenerRidersPorCiudad(tenantId, cityId, 0, 1, "id");
+            Object response = getRidersByCity(tenantId, cityId, 0, 1, "id");
             if (response instanceof Map) {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> map = (Map<String, Object>) response;

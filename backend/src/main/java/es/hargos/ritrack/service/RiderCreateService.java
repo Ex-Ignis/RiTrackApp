@@ -28,6 +28,7 @@ public class RiderCreateService {
     private final GlovoClient glovoClient;
     private final RoosterCacheService roosterCache;
     private final TenantSettingsService tenantSettingsService;
+    private final CityService cityService;
 
     // Contador en memoria para emails (se reinicia con cada restart)
     private final AtomicInteger emailCounter = new AtomicInteger(1000);
@@ -35,10 +36,12 @@ public class RiderCreateService {
     @Autowired
     public RiderCreateService(GlovoClient glovoClient,
                               RoosterCacheService roosterCache,
-                              TenantSettingsService tenantSettingsService) {
+                              TenantSettingsService tenantSettingsService,
+                              CityService cityService) {
         this.glovoClient = glovoClient;
         this.roosterCache = roosterCache;
         this.tenantSettingsService = tenantSettingsService;
+        this.cityService = cityService;
     }
 
 
@@ -153,7 +156,7 @@ public class RiderCreateService {
         logAssignedValues(tenantId, payload);
 
         // Enviar a la API
-        Object result = glovoClient.crearEmpleado(tenantId, payload);
+        Object result = glovoClient.createEmployee(tenantId, payload);
 
         // Limpiar caché para reflejar cambios
         roosterCache.clearCache(tenantId);
@@ -246,24 +249,30 @@ public class RiderCreateService {
         }
         payload.put("vehicle_type_ids", vehicleTypeIds);
 
-        // starting_point_ids: usar los proporcionados o buscar por ciudad
+        // starting_point_ids: obtener TODOS los starting points de la ciudad desde Glovo API
         List<Integer> startingPointIds = data.getStartingPointIds();
+
+        // Si el frontend NO envió starting points, obtenerlos automáticamente
         if (startingPointIds == null || startingPointIds.isEmpty()) {
             // Obtener la ciudad del contrato
             Integer cityId = data.getContract().getCityId();
             if (cityId != null) {
-                // Buscar starting points por defecto para esta ciudad
-                List<Integer> defaultPoints = defaultStartingPointsByCity.get(cityId.toString());
-                if (defaultPoints != null && !defaultPoints.isEmpty()) {
-                    startingPointIds = new ArrayList<>(defaultPoints);
-                    logger.info("Starting points asignados automáticamente para ciudad {}: {}",
-                            cityId, startingPointIds);
-                } else {
-                    logger.info("No hay starting points por defecto para ciudad {}", cityId);
+                try {
+                    // Consultar Glovo API para obtener TODOS los starting points de la ciudad
+                    startingPointIds = cityService.getStartingPointIds(tenantId, cityId);
+                    logger.info("Tenant {}: Starting points obtenidos automáticamente desde Glovo API para ciudad {}: {} puntos",
+                            tenantId, cityId, startingPointIds.size());
+                } catch (Exception e) {
+                    logger.error("Tenant {}: Error obteniendo starting points desde Glovo API para ciudad {}: {}",
+                            tenantId, cityId, e.getMessage());
+                    // Fallback a valores vacíos si falla la API
                     startingPointIds = new ArrayList<>();
                 }
             }
+        } else {
+            logger.info("Tenant {}: Starting points proporcionados por el frontend: {}", tenantId, startingPointIds);
         }
+
         if (startingPointIds != null && !startingPointIds.isEmpty()) {
             payload.put("starting_point_ids", startingPointIds);
         }

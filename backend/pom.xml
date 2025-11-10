@@ -10,7 +10,7 @@
 	</parent>
 	<groupId>es.hargos</groupId>
 	<artifactId>ritrack</artifactId>
-	<version>0.0.1-SNAPSHOT</version>
+	<version>2</version>
 	<name>RiTrack</name>
 	<description>RiTrack - Riders Management and Administration System</description>
 	<url/>

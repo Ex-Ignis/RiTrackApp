@@ -200,7 +200,7 @@ public class RiderLocationService {
                 long startTime = System.currentTimeMillis();
 
                 // Llamada a GlovoClient con tenantId
-                Object ridersData = glovoClient.obtenerRidersPorCiudad(
+                Object ridersData = glovoClient.getRidersByCity(
                     tenantId, cityId, page, PAGE_SIZE, "employee_id"
                 );
 

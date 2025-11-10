@@ -27,7 +27,7 @@ public class RiderUpdateService {
         logger.info("Tenant {}: Actualizando rider {} con datos parciales", tenantId, riderId);
 
         // Obtener datos actuales del rider
-        Object currentDataObj = glovoClient.obtenerEmpleadoPorId(tenantId, riderId);
+        Object currentDataObj = glovoClient.getEmployeeById(tenantId, riderId);
         if (currentDataObj == null) {
             throw new RuntimeException("Tenant " + tenantId + ": Rider no encontrado: " + riderId);
         }
@@ -39,7 +39,7 @@ public class RiderUpdateService {
         Map<String, Object> payload = buildUpdatePayload(currentData, updateData);
 
         // Enviar actualización - el error se maneja en GlovoClient
-        Object result = glovoClient.actualizarEmpleado(tenantId, riderId, payload);
+        Object result = glovoClient.updateEmployee(tenantId, riderId, payload);
 
         // Limpiar caché para reflejar cambios inmediatamente
         roosterCache.clearCache(tenantId);

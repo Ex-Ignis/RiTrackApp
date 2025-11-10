@@ -345,7 +345,7 @@ public class RiderFilterService {
         while (hasMore && page < 50) {
             long startTime = System.currentTimeMillis();
 
-            Object response = glovoClient.obtenerRidersPorCiudad(tenantId, cityId, page, 100, "employee_id");
+            Object response = glovoClient.getRidersByCity(tenantId, cityId, page, 100, "employee_id");
 
             if (response instanceof Map) {
                 @SuppressWarnings("unchecked")

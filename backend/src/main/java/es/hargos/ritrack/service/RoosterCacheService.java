@@ -35,7 +35,7 @@ public class RoosterCacheService {
     @Cacheable(value = "rooster-employees", key = "#tenantId")
     public List<?> getAllEmployees(Long tenantId) throws Exception {
         logger.info("Tenant {}: CACHE MISS - Cargando todos los empleados de Rooster API", tenantId);
-        List<?> employees = glovoClient.obtenerEmpleados(tenantId);
+        List<?> employees = glovoClient.getEmployees(tenantId);
         logger.info("Tenant {}: Cargados {} empleados en caché (TTL: {} min)", tenantId, employees.size(), roosterTtlMinutes);
         return employees;
     }
