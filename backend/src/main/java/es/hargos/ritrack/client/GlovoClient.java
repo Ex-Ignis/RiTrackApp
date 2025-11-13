@@ -190,12 +190,13 @@ public class GlovoClient {
                 logger.error("Error 400 updating employee {} for tenant {}: {}",
                     employeeId, tenantId, responseBody);
 
-                if (responseBody.contains("email") && responseBody.contains("already be in use")) {
+                // IMPORTANTE: La condición más específica debe ir primero
+                if (responseBody.contains("email or phone number may already be in use")) {
+                    throw new RuntimeException("DUPLICATE_EMAIL_OR_PHONE:El email o teléfono ya está en uso");
+                } else if (responseBody.contains("email") && responseBody.contains("already be in use")) {
                     throw new RuntimeException("DUPLICATE_EMAIL:El email ya está en uso por otro rider");
                 } else if (responseBody.contains("phone") && responseBody.contains("already be in use")) {
                     throw new RuntimeException("DUPLICATE_PHONE:El teléfono ya está en uso por otro rider");
-                } else if (responseBody.contains("email or phone number may already be in use")) {
-                    throw new RuntimeException("DUPLICATE_EMAIL_OR_PHONE:El email o teléfono ya está en uso");
                 } else {
                     throw new RuntimeException("UPDATE_ERROR:" + responseBody);
                 }
