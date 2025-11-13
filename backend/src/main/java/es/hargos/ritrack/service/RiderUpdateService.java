@@ -82,7 +82,9 @@ public class RiderUpdateService {
         // Preparar fields para actualización automática de operational_phone_number
         Map<String, String> fieldsToUpdate = new HashMap<>();
 
-        // Si se actualizó el teléfono y no se especificó operational_phone_number, actualizarlo automáticamente
+        // SINCRONIZACIÓN BIDIRECCIONAL DE TELÉFONOS
+
+        // DIRECCIÓN 1: phone_number → operational_phone_number
         if (updateData.getPhone() != null) {
             boolean operationalPhoneSpecified = false;
 
@@ -94,10 +96,20 @@ public class RiderUpdateService {
             // Solo actualizar operational_phone_number si no se especificó explícitamente
             if (!operationalPhoneSpecified) {
                 fieldsToUpdate.put("operational_phone_number", updateData.getPhone());
-                logger.info("Actualizando operational_phone_number automáticamente con el nuevo teléfono");
+                logger.info("Sincronizando operational_phone_number con phone_number: {}", updateData.getPhone());
             }
         } else if (updateData.getFields() != null) {
             fieldsToUpdate.putAll(updateData.getFields());
+        }
+
+        // DIRECCIÓN 2: operational_phone_number → phone_number
+        // Si se actualizó operational_phone_number pero NO phone_number, sincronizar phone_number
+        if (fieldsToUpdate.containsKey("operational_phone_number") && updateData.getPhone() == null) {
+            String operationalPhone = fieldsToUpdate.get("operational_phone_number");
+            if (operationalPhone != null && !operationalPhone.trim().isEmpty()) {
+                payload.put("phone_number", operationalPhone);
+                logger.info("Sincronizando phone_number con operational_phone_number: {}", operationalPhone);
+            }
         }
 
 

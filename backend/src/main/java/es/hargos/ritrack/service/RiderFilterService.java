@@ -592,9 +592,11 @@ public class RiderFilterService {
             return false;
         }
 
-        if (filters.getPhone() != null && rider.getPhone() != null &&
-                !rider.getPhone().contains(filters.getPhone())) {
-            return false;
+        if (filters.getPhone() != null) {
+            // Si se busca por teléfono, solo incluir riders que tengan teléfono y coincida
+            if (rider.getPhone() == null || !rider.getPhone().contains(filters.getPhone())) {
+                return false;
+            }
         }
 
         if (filters.getEmail() != null && rider.getEmail() != null &&
@@ -654,9 +656,11 @@ public class RiderFilterService {
             return false;
         }
 
-        if (filters.getPhone() != null && rider.getPhone() != null &&
-                !rider.getPhone().contains(filters.getPhone())) {
-            return false;
+        if (filters.getPhone() != null) {
+            // Si se busca por teléfono, solo incluir riders que tengan teléfono y coincida
+            if (rider.getPhone() == null || !rider.getPhone().contains(filters.getPhone())) {
+                return false;
+            }
         }
 
         if (filters.getEmail() != null && rider.getEmail() != null &&
