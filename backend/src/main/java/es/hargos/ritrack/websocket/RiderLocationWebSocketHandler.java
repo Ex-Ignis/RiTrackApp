@@ -140,6 +140,13 @@ public class RiderLocationWebSocketHandler implements WebSocketHandler {
     /**
      * MULTI-TENANT: Autentica la sesión con un JWT
      * Extrae el tenantId del token y lo guarda en sessionTenantMap
+     *
+     * Flujo:
+     * 1. Recibe token (obligatorio) y tenantId (opcional) del mensaje
+     * 2. Si viene tenantId, valida que el usuario tiene acceso a ese tenant
+     * 3. Si NO viene tenantId, usa el primer tenant de RiTrack del JWT (fallback)
+     * 4. Convierte hargosTenantId → ritrackTenantId
+     * 5. Guarda ritrackTenantId en sessionTenantMap
      */
     private void handleAuthentication(WebSocketSession session, Map<String, Object> messageData) {
         try {
@@ -158,45 +165,54 @@ public class RiderLocationWebSocketHandler implements WebSocketHandler {
                 return;
             }
 
-            // Extraer claims del JWT
-            JWTClaimsSet claims = jwtUtil.extractAllClaims(token);
-            if (claims == null) {
-                sendMessageToSession(session, createErrorMessage("Error extrayendo claims del JWT"));
-                session.close(CloseStatus.NOT_ACCEPTABLE);
-                return;
-            }
+            // ✅ NUEVO: Obtener tenantId del mensaje (opcional para compatibilidad)
+            Long requestedTenantId = null;
+            Object tenantIdObj = messageData.get("tenantId");
 
-            // Extraer tenantId del JWT (viene en los claims del token de HargosAuth)
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> tenants = (List<Map<String, Object>>) claims.getClaim("tenants");
-
-            if (tenants == null || tenants.isEmpty()) {
-                sendMessageToSession(session, createErrorMessage("JWT no contiene información de tenants"));
-                session.close(CloseStatus.NOT_ACCEPTABLE);
-                return;
-            }
-
-            // Buscar el tenant de RiTrack (viene hargosTenantId del JWT)
-            Long hargosTenantId = null;
-            for (Map<String, Object> tenant : tenants) {
-                if ("RiTrack".equals(tenant.get("appName"))) {
-                    Object tenantIdObj = tenant.get("tenantId");
-                    if (tenantIdObj instanceof Number) {
-                        hargosTenantId = ((Number) tenantIdObj).longValue();
-                    } else if (tenantIdObj instanceof String) {
-                        hargosTenantId = Long.parseLong((String) tenantIdObj);
+            if (tenantIdObj != null) {
+                // Frontend envió tenantId específico
+                if (tenantIdObj instanceof Number) {
+                    requestedTenantId = ((Number) tenantIdObj).longValue();
+                } else if (tenantIdObj instanceof String) {
+                    try {
+                        requestedTenantId = Long.parseLong((String) tenantIdObj);
+                    } catch (NumberFormatException e) {
+                        logger.warn("tenantId inválido en mensaje: {}", tenantIdObj);
                     }
-                    break;
                 }
             }
 
-            if (hargosTenantId == null) {
-                sendMessageToSession(session, createErrorMessage("Usuario no tiene acceso a RiTrack"));
-                session.close(CloseStatus.NOT_ACCEPTABLE);
-                return;
+            // ✅ NUEVO: Validar tenantId o usar fallback
+            Long hargosTenantId;
+
+            if (requestedTenantId != null) {
+                // Frontend especificó un tenant - validar que el usuario tiene acceso
+                logger.info("Session {}: Validando acceso al tenant solicitado: {}", session.getId(), requestedTenantId);
+                hargosTenantId = jwtUtil.extractTenantIdIfAuthorized(token, requestedTenantId);
+
+                if (hargosTenantId == null) {
+                    logger.warn("Session {}: Usuario NO tiene acceso al tenant {}", session.getId(), requestedTenantId);
+                    sendMessageToSession(session, createErrorMessage("No tienes acceso al tenant solicitado"));
+                    session.close(CloseStatus.NOT_ACCEPTABLE);
+                    return;
+                }
+
+                logger.info("Session {}: Acceso validado al tenant {}", session.getId(), hargosTenantId);
+            } else {
+                // Frontend NO especificó tenant - usar el primero (compatibilidad hacia atrás)
+                logger.info("Session {}: No se especificó tenantId, usando primer tenant del JWT", session.getId());
+                hargosTenantId = jwtUtil.extractFirstTenantId(token);
+
+                if (hargosTenantId == null) {
+                    sendMessageToSession(session, createErrorMessage("Usuario no tiene acceso a RiTrack"));
+                    session.close(CloseStatus.NOT_ACCEPTABLE);
+                    return;
+                }
+
+                logger.info("Session {}: Usando primer tenant de RiTrack: {}", session.getId(), hargosTenantId);
             }
 
-            // ✅ CRÍTICO: Convertir hargosTenantId -> id (para APIs de Glovo)
+            // ✅ CRÍTICO: Convertir hargosTenantId → ritrackTenantId (id interno)
             Optional<TenantEntity> tenantOpt = tenantRepository.findByHargosTenantId(hargosTenantId);
             if (tenantOpt.isEmpty()) {
                 logger.error("No se encontró tenant con hargosTenantId: {}", hargosTenantId);
@@ -211,13 +227,13 @@ public class RiderLocationWebSocketHandler implements WebSocketHandler {
             // Guardar ritrackTenantId (id de la tabla tenants, no hargosTenantId) en el mapa
             sessionTenantMap.put(session.getId(), ritrackTenantId);
 
-            logger.info("Session {} autenticada: hargosTenantId={}, ritrackTenantId={}, tenant={}",
+            logger.info("✅ Session {} autenticada: hargosTenantId={}, ritrackTenantId={}, tenant={}",
                     session.getId(), hargosTenantId, ritrackTenantId, tenant.getName());
             sendMessageToSession(session, createSimpleMessage("authenticated",
                 "Autenticación exitosa para tenant " + tenant.getName()));
 
         } catch (Exception e) {
-            logger.error("Error en autenticación de sesión {}: {}", session.getId(), e.getMessage());
+            logger.error("Error en autenticación de sesión {}: {}", session.getId(), e.getMessage(), e);
             sendMessageToSession(session, createErrorMessage("Autenticación fallida: " + e.getMessage()));
             try {
                 session.close(CloseStatus.NOT_ACCEPTABLE);

@@ -61,7 +61,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             String jwt = extractJwtFromRequest(request);
 
             if (jwt != null && jwtUtil.validateToken(jwt)) {
-                authenticateUser(jwt, request);
+                authenticateUser(jwt, request, response);
             } else {
                 log.debug("No valid JWT token found in request to {}", request.getRequestURI());
             }
@@ -102,7 +102,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
      * 6. Find or create tenant in RiTrack
      * 7. Set TenantContext with selected tenant
      */
-    private void authenticateUser(String jwt, HttpServletRequest request) {
+    private void authenticateUser(String jwt, HttpServletRequest request, HttpServletResponse response) throws IOException {
         try {
             // 1. Check for global role (SUPER_ADMIN)
             String globalRole = jwtUtil.extractGlobalRole(jwt);
@@ -150,6 +150,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 log.error("User attempted to access tenant {} which is not in their JWT. Available tenants: {}",
                         requestedTenantId,
                         jwtTenants.stream().map(JwtTenantInfo::getTenantId).collect(Collectors.toList()));
+
+                // ✅ NUEVO: Enviar respuesta HTTP 403 explícita
+                response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                response.setContentType("application/json");
+                response.getWriter().write("{\"error\":\"No tienes acceso a este tenant\",\"code\":\"TENANT_ACCESS_DENIED\"}");
                 return;
             }
 

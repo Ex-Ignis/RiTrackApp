@@ -247,4 +247,101 @@ public class JwtUtil {
             return null;
         }
     }
+
+    /**
+     * MULTI-TENANT: Extrae un tenantId específico de la lista de tenants en el JWT
+     * y verifica que el usuario tiene acceso a ese tenant.
+     *
+     * @param token JWT token
+     * @param tenantId El tenant ID que el usuario quiere acceder (hargosTenantId)
+     * @return El tenantId si el usuario tiene acceso, null si no
+     */
+    public Long extractTenantIdIfAuthorized(String token, Long tenantId) {
+        try {
+            JWTClaimsSet claims = extractAllClaims(token);
+            if (claims == null) {
+                return null;
+            }
+
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> tenants = (List<Map<String, Object>>) claims.getClaim("tenants");
+
+            if (tenants == null || tenants.isEmpty()) {
+                log.warn("No tenants found in JWT");
+                return null;
+            }
+
+            // Verificar que el usuario tiene acceso a este tenant
+            boolean hasAccess = tenants.stream()
+                    .anyMatch(t -> {
+                        String appName = (String) t.get("appName");
+                        if (!"RiTrack".equalsIgnoreCase(appName)) {
+                            return false;
+                        }
+
+                        Object tid = t.get("tenantId");
+                        Long tenantIdInJwt = tid instanceof Integer
+                                ? ((Integer) tid).longValue()
+                                : (Long) tid;
+
+                        return tenantIdInJwt != null && tenantIdInJwt.equals(tenantId);
+                    });
+
+            if (!hasAccess) {
+                log.warn("User attempted to access tenant {} which is not in their JWT", tenantId);
+                return null;
+            }
+
+            return tenantId;
+
+        } catch (Exception e) {
+            log.error("Error validating tenant access in JWT", e);
+            return null;
+        }
+    }
+
+    /**
+     * MULTI-TENANT: Extrae el primer tenantId del JWT (fallback para compatibilidad).
+     * Filtra solo tenants de RiTrack.
+     *
+     * @param token JWT token string
+     * @return El primer tenantId de RiTrack, o null si no hay ninguno
+     */
+    public Long extractFirstTenantId(String token) {
+        try {
+            JWTClaimsSet claims = extractAllClaims(token);
+            if (claims == null) {
+                return null;
+            }
+
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> tenants = (List<Map<String, Object>>) claims.getClaim("tenants");
+
+            if (tenants == null || tenants.isEmpty()) {
+                log.warn("No tenants found in JWT");
+                return null;
+            }
+
+            // Buscar el primer tenant de RiTrack
+            for (Map<String, Object> tenant : tenants) {
+                String appName = (String) tenant.get("appName");
+                if ("RiTrack".equalsIgnoreCase(appName)) {
+                    Object tenantIdObj = tenant.get("tenantId");
+                    Long tenantId = tenantIdObj instanceof Integer
+                            ? ((Integer) tenantIdObj).longValue()
+                            : (Long) tenantIdObj;
+
+                    log.debug("Using first RiTrack tenant from JWT: {}", tenantId);
+                    return tenantId;
+                }
+            }
+
+            log.warn("No RiTrack tenants found in JWT");
+            return null;
+
+        } catch (Exception e) {
+            log.error("Error extracting first tenant ID from JWT", e);
+            return null;
+        }
+    }
 }
