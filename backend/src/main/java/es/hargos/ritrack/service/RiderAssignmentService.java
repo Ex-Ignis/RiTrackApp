@@ -19,16 +19,19 @@ public class RiderAssignmentService {
     private final RoosterCacheService roosterCache;
     private final RiderDetailService riderDetailService;
     private final CityService cityService;
+    private final AutoBlockService autoBlockService;
 
     @Autowired
     public RiderAssignmentService(GlovoClient glovoClient,
                                    RoosterCacheService roosterCache,
                                    RiderDetailService riderDetailService,
-                                   CityService cityService) {
+                                   CityService cityService,
+                                   AutoBlockService autoBlockService) {
         this.glovoClient = glovoClient;
         this.roosterCache = roosterCache;
         this.riderDetailService = riderDetailService;
         this.cityService = cityService;
+        this.autoBlockService = autoBlockService;
     }
 
     /**
@@ -107,6 +110,9 @@ public class RiderAssignmentService {
         // Llamar a la API
         Object result = glovoClient.assignStartingPointsToEmployee(tenantId, riderId, payload);
 
+        // Marcar como bloqueo MANUAL (prioridad sobre auto-bloqueo)
+        autoBlockService.markAsManualBlock(tenantId, riderId.toString(), true);
+
         // Limpiar caché para reflejar cambios
         roosterCache.clearCache(tenantId);
         logger.info("Tenant {}: Rider {} bloqueado exitosamente y caché limpiado", tenantId, riderId);
@@ -145,6 +151,9 @@ public class RiderAssignmentService {
 
         // Llamar a la API
         Object result = glovoClient.assignStartingPointsToEmployee(tenantId, riderId, payload);
+
+        // Quitar marca de bloqueo MANUAL
+        autoBlockService.markAsManualBlock(tenantId, riderId.toString(), false);
 
         // Limpiar caché para reflejar cambios
         roosterCache.clearCache(tenantId);

@@ -52,6 +52,7 @@ public class RiderLocationService {
     private final TenantRepository tenantRepository;
     private final TenantSettingsService tenantSettingsService;
     private final TenantOnboardingService onboardingService;
+    private final AutoBlockService autoBlockService;
 
     @Value("${debug.mock-data.enabled:false}")
     private boolean mockDataEnabled;
@@ -61,12 +62,14 @@ public class RiderLocationService {
                                  RiderLocationWebSocketHandler webSocketHandler,
                                  TenantRepository tenantRepository,
                                  TenantSettingsService tenantSettingsService,
-                                 TenantOnboardingService onboardingService) {
+                                 TenantOnboardingService onboardingService,
+                                 AutoBlockService autoBlockService) {
         this.glovoClient = glovoClient;
         this.webSocketHandler = webSocketHandler;
         this.tenantRepository = tenantRepository;
         this.tenantSettingsService = tenantSettingsService;
         this.onboardingService = onboardingService;
+        this.autoBlockService = autoBlockService;
     }
 
     // ===============================================
@@ -154,6 +157,9 @@ public class RiderLocationService {
                         webSocketHandler.broadcastRiderLocationsByCity(tenantId, cityId, locations);
                         logger.debug("Tenant {}, Ciudad {}: Enviadas {} ubicaciones",
                             tenantName, cityId, locations.size());
+
+                        // Procesar auto-bloqueo por saldo de cash
+                        autoBlockService.processAutoBlockForCity(tenantId, cityId, locations);
                     }
 
                 } catch (Exception e) {
@@ -394,6 +400,14 @@ public class RiderLocationService {
                 dto.setHasActiveDelivery(hasActiveDeliveries != null && hasActiveDeliveries);
             } else {
                 dto.setHasActiveDelivery(false);
+            }
+
+            // Wallet info - Para sistema de auto-bloqueo
+            @SuppressWarnings("unchecked")
+            Map<String, Object> walletInfo = (Map<String, Object>) riderMap.get("wallet_info");
+            if (walletInfo != null) {
+                dto.setWalletBalance(getDoubleValue(walletInfo, "balance"));
+                dto.setWalletLimitStatus((String) walletInfo.get("limit_status"));
             }
 
             return dto;

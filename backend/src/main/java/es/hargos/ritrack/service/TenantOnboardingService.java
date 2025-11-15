@@ -828,6 +828,12 @@ public class TenantOnboardingService {
             // Default: Bike, Car, Motorbike, Scooter
             saveSetting(tenant, "default_vehicle_type_ids", "5,1,3,2", "JSON", "Tipos de vehículo por defecto");
         }
+
+        // auto_block_enabled (DESACTIVADO por defecto)
+        saveSetting(tenant, "auto_block_enabled", "false", "BOOLEAN", "Activar bloqueo automático por saldo de cash alto");
+
+        // auto_block_cash_limit (límite por defecto: 150€)
+        saveSetting(tenant, "auto_block_cash_limit", "150.00", "NUMBER", "Límite de cash en € para bloqueo automático");
     }
 
     /**

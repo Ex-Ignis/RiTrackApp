@@ -14,6 +14,7 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -54,6 +55,34 @@ public class TenantSettingsService {
     public String getSetting(Long tenantId, String settingKey, String defaultValue) {
         String value = getSetting(tenantId, settingKey);
         return value != null ? value : defaultValue;
+    }
+
+    /**
+     * Obtiene una configuración booleana
+     */
+    public Boolean getBooleanSetting(Long tenantId, String settingKey, Boolean defaultValue) {
+        String value = getSetting(tenantId, settingKey);
+        if (value == null) {
+            return defaultValue;
+        }
+        return Boolean.parseBoolean(value);
+    }
+
+    /**
+     * Obtiene una configuración BigDecimal
+     */
+    public BigDecimal getBigDecimalSetting(Long tenantId, String settingKey, BigDecimal defaultValue) {
+        String value = getSetting(tenantId, settingKey);
+        if (value == null) {
+            return defaultValue;
+        }
+        try {
+            return new BigDecimal(value);
+        } catch (NumberFormatException e) {
+            logger.error("Tenant {}: Error parsing BigDecimal setting '{}': {}",
+                    tenantId, settingKey, e.getMessage());
+            return defaultValue;
+        }
     }
 
     /**
@@ -238,5 +267,21 @@ public class TenantSettingsService {
         settingsRepository.save(setting);
 
         logger.debug("Tenant {}: Setting '{}' = '{}'", tenant.getId(), key, value);
+    }
+
+    /**
+     * Guarda un setting individual (versión pública para servicios externos).
+     *
+     * @param tenantId Tenant ID
+     * @param key Clave del setting
+     * @param value Valor del setting
+     */
+    @Transactional
+    @CacheEvict(value = "tenant-settings", key = "#tenantId + '-' + #key")
+    public void saveSetting(Long tenantId, String key, String value) {
+        TenantEntity tenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> new IllegalArgumentException("Tenant no encontrado: " + tenantId));
+
+        updateSetting(tenant, key, value);
     }
 }

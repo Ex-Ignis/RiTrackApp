@@ -229,6 +229,30 @@ BEGIN
     EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_metrics_weekly_week ON %I.rider_metrics_weekly(week DESC)',
         tenant_schema_name, tenant_schema_name);
 
+    -- Create rider_block_status table (auto-block by cash balance)
+    EXECUTE format('
+        CREATE TABLE IF NOT EXISTS %I.rider_block_status (
+            employee_id VARCHAR(255) PRIMARY KEY,
+            is_auto_blocked BOOLEAN NOT NULL DEFAULT false,
+            is_manual_blocked BOOLEAN NOT NULL DEFAULT false,
+            last_balance NUMERIC(10, 2),
+            last_balance_check TIMESTAMP,
+            auto_blocked_at TIMESTAMP,
+            auto_unblocked_at TIMESTAMP,
+            manual_blocked_at TIMESTAMP,
+            manual_blocked_by_user_id BIGINT,
+            manual_block_reason TEXT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    ', tenant_schema_name);
+
+    -- Create indexes for rider_block_status
+    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_rider_block_status_is_auto_blocked ON %I.rider_block_status(is_auto_blocked)',
+        tenant_schema_name, tenant_schema_name);
+    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_rider_block_status_last_balance_check ON %I.rider_block_status(last_balance_check DESC)',
+        tenant_schema_name, tenant_schema_name);
+
     -- Grant permissions
     EXECUTE format('GRANT ALL PRIVILEGES ON SCHEMA %I TO ritrack', tenant_schema_name);
     EXECUTE format('GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA %I TO ritrack', tenant_schema_name);
@@ -292,7 +316,14 @@ SELECT setval('public.tenants_id_seq', (SELECT MAX(id) FROM public.tenants));
 --   2. Guarda .pem en ./keys/tenant_{id}.pem
 --   3. Inserta en public.glovo_credentials
 --   4. Crea schema PostgreSQL con create_tenant_schema()
---   5. Inserta settings en public.tenant_settings
+--      - rider_metrics_csv, rider_metrics_daily, rider_metrics_weekly
+--      - rider_block_status (auto-bloqueo por cash)
+--   5. Inserta settings en public.tenant_settings:
+--      - active_city_ids
+--      - rider_email_domain, rider_email_base, rider_name_base
+--      - default_vehicle_type_ids
+--      - auto_block_enabled = false (DESACTIVADO por defecto)
+--      - auto_block_cash_limit = 150.00 (límite por defecto)
 --   6. Activa el tenant (is_active = true)
 --
 -- ==============================================
