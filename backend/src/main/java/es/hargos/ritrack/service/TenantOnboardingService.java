@@ -66,6 +66,7 @@ public class TenantOnboardingService {
     private final FileStorageService fileStorageService;
     private final TenantSchemaService schemaService;
     private final GlovoClient glovoClient;
+    private final RiderLimitService riderLimitService;
     private final RestTemplate restTemplate;
 
     @Autowired
@@ -74,13 +75,15 @@ public class TenantOnboardingService {
                                      TenantSettingsRepository settingsRepository,
                                      FileStorageService fileStorageService,
                                      TenantSchemaService schemaService,
-                                     GlovoClient glovoClient) {
+                                     GlovoClient glovoClient,
+                                     RiderLimitService riderLimitService) {
         this.tenantRepository = tenantRepository;
         this.credentialsRepository = credentialsRepository;
         this.settingsRepository = settingsRepository;
         this.fileStorageService = fileStorageService;
         this.schemaService = schemaService;
         this.glovoClient = glovoClient;
+        this.riderLimitService = riderLimitService;
         this.restTemplate = new RestTemplate();
     }
 
@@ -203,6 +206,32 @@ public class TenantOnboardingService {
             tenant.setIsActive(true);
             tenantRepository.save(tenant);
             logger.info("Tenant {}: Activado exitosamente", tenantId);
+
+            // 9. Validar límites de riders
+            try {
+                logger.info("Tenant {}: Validando límites de riders...", tenantId);
+
+                Long hargosTenantId = tenant.getHargosTenantId();
+
+                if (hargosTenantId == null) {
+                    logger.warn("Tenant {}: No tiene hargosTenantId, saltando validación de límites", tenantId);
+                } else {
+                    var warning = riderLimitService.validateDuringOnboarding(tenantId, hargosTenantId);
+
+                    if (warning != null) {
+                        logger.warn("Tenant {}: ADVERTENCIA DE LÍMITE CREADA - Riders actuales: {}, Límite: {}, Exceso: {}, Expira: {}",
+                                tenantId, warning.getCurrentCount(), warning.getAllowedLimit(),
+                                warning.getExcessCount(), warning.getExpiresAt());
+                    } else {
+                        logger.info("Tenant {}: Sin excesos de límite detectados", tenantId);
+                    }
+                }
+            } catch (Exception e) {
+                // FAIL-SAFE: Si falla la validación, NO bloquear onboarding
+                // pero registrar error para investigación
+                logger.error("Tenant {}: Error validando límites (onboarding continuará): {}",
+                        tenantId, e.getMessage(), e);
+            }
 
             logger.info("Tenant {}: Provisioning completado exitosamente", tenantId);
 

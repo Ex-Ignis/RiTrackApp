@@ -25,6 +25,8 @@ public class RiderCreateService {
     private final RoosterCacheService roosterCache;
     private final TenantSettingsService tenantSettingsService;
     private final CityService cityService;
+    private final RiderLimitService riderLimitService;
+    private final es.hargos.ritrack.repository.TenantRepository tenantRepository;
 
     // Contador en memoria para emails (se reinicia con cada restart)
     private final AtomicInteger emailCounter = new AtomicInteger(1000);
@@ -33,11 +35,15 @@ public class RiderCreateService {
     public RiderCreateService(GlovoClient glovoClient,
                               RoosterCacheService roosterCache,
                               TenantSettingsService tenantSettingsService,
-                              CityService cityService) {
+                              CityService cityService,
+                              RiderLimitService riderLimitService,
+                              es.hargos.ritrack.repository.TenantRepository tenantRepository) {
         this.glovoClient = glovoClient;
         this.roosterCache = roosterCache;
         this.tenantSettingsService = tenantSettingsService;
         this.cityService = cityService;
+        this.riderLimitService = riderLimitService;
+        this.tenantRepository = tenantRepository;
     }
 
 
@@ -100,6 +106,25 @@ public class RiderCreateService {
 
     public Map<String, Object> createRider(Long tenantId, RiderCreateDto createData) throws Exception {
         logger.info("Tenant {}: Iniciando creación de rider", tenantId);
+
+        // VALIDAR LÍMITES DE RIDERS ANTES DE CUALQUIER OPERACIÓN
+        var tenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> new IllegalArgumentException("Tenant no encontrado: " + tenantId));
+
+        Long hargosTenantId = tenant.getHargosTenantId();
+
+        if (hargosTenantId != null) {
+            try {
+                riderLimitService.validateBeforeCreatingRider(tenantId, hargosTenantId);
+                logger.debug("Tenant {}: Validación de límites OK", tenantId);
+            } catch (IllegalStateException e) {
+                // Re-lanzar con mensaje claro para el frontend
+                logger.error("Tenant {}: Creación bloqueada por límite - {}", tenantId, e.getMessage());
+                throw e;
+            }
+        } else {
+            logger.warn("Tenant {}: No tiene hargosTenantId, saltando validación de límites", tenantId);
+        }
 
         // Si no viene nombre o está vacío, generarlo automáticamente
         if (createData.getName() == null || createData.getName().trim().isEmpty()) {
