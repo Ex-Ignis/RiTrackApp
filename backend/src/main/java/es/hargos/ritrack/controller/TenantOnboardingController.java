@@ -69,7 +69,12 @@ public class TenantOnboardingController {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
             }
 
-            Long tenantId = tenantInfo.getFirstTenantId();
+            // 🔥 CRÍTICO: Usar selectedTenantId (del header X-Tenant-Id), NO el primer tenant
+            Long tenantId = tenantInfo.getSelectedTenantId();
+            if (tenantId == null) {
+                // Fallback al primer tenant si no hay selectedTenantId
+                tenantId = tenantInfo.getFirstTenantId();
+            }
             logger.info("Verificando status de onboarding para tenant {}", tenantId);
             OnboardingStatusDto status = onboardingService.getOnboardingStatus(tenantId);
             return ResponseEntity.ok(status);
@@ -127,7 +132,12 @@ public class TenantOnboardingController {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
             }
 
-            Long tenantId = tenantInfo.getFirstTenantId();
+            // 🔥 CRÍTICO: Usar selectedTenantId (del header X-Tenant-Id), NO el primer tenant
+            Long tenantId = tenantInfo.getSelectedTenantId();
+            if (tenantId == null) {
+                // Fallback al primer tenant si no hay selectedTenantId
+                tenantId = tenantInfo.getFirstTenantId();
+            }
 
             logger.info("Tenant {}: Iniciando configuración de onboarding", tenantId);
 
@@ -145,6 +155,10 @@ public class TenantOnboardingController {
                     onboardingData,
                     pemFile
             );
+
+            // Validar límites de riders DESPUÉS de que la transacción termine
+            // Esto evita el error "Transaction silently rolled back"
+            onboardingService.validateRiderLimitsAfterOnboarding(tenantId);
 
             logger.info("Tenant {}: Onboarding completado exitosamente", tenantId);
             return ResponseEntity.ok(result);
@@ -200,7 +214,12 @@ public class TenantOnboardingController {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
             }
 
-            Long tenantId = tenantInfo.getFirstTenantId();
+            // 🔥 CRÍTICO: Usar selectedTenantId (del header X-Tenant-Id), NO el primer tenant
+            Long tenantId = tenantInfo.getSelectedTenantId();
+            if (tenantId == null) {
+                // Fallback al primer tenant si no hay selectedTenantId
+                tenantId = tenantInfo.getFirstTenantId();
+            }
 
             logger.info("Tenant {}: Actualizando configuración", tenantId);
 
@@ -313,7 +332,12 @@ public class TenantOnboardingController {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
             }
 
-            Long tenantId = tenantInfo.getFirstTenantId();
+            // 🔥 CRÍTICO: Usar selectedTenantId (del header X-Tenant-Id), NO el primer tenant
+            Long tenantId = tenantInfo.getSelectedTenantId();
+            if (tenantId == null) {
+                // Fallback al primer tenant si no hay selectedTenantId
+                tenantId = tenantInfo.getFirstTenantId();
+            }
 
             // Validar que al menos un parámetro fue enviado
             if (pemFile == null && clientId == null && keyId == null &&

@@ -34,6 +34,7 @@ public class RiderLimitService {
     private final HargosAuthClient hargosAuthClient;
     private final RiderLimitWarningRepository warningRepository;
     private final RoosterCacheService roosterCache;
+    private final jakarta.persistence.EntityManager entityManager;
 
     /**
      * Count the actual number of riders in Glovo API for the tenant.
@@ -233,6 +234,16 @@ public class RiderLimitService {
     }
 
     /**
+     * Get the active warning for the current tenant (uses tenant context).
+     *
+     * @param schemaName Tenant schema name (not used, kept for compatibility)
+     * @return Active warning or null
+     */
+    public RiderLimitWarningEntity getActiveWarningBySchema(String schemaName) {
+        return warningRepository.findActiveWarning().orElse(null);
+    }
+
+    /**
      * Resolve a warning (mark as resolved).
      * This happens when the tenant upgrades subscription or reduces rider count.
      *
@@ -259,43 +270,86 @@ public class RiderLimitService {
      * Re-check limits (called after subscription update or manual trigger).
      * If tenant is now within limit, resolve the warning automatically.
      *
+     * This method works for public endpoints by using native SQL with explicit schema.
+     *
      * @param ritrackTenantId RiTrack tenant ID
      * @param hargosTenantId HargosAuth tenant ID
+     * @param schemaName Tenant schema name
      * @return true if warning was resolved, false otherwise
      * @throws Exception if validation fails
      */
     @Transactional
-    public boolean recheckAndResolveIfPossible(Long ritrackTenantId, Long hargosTenantId) throws Exception {
-        logger.info("Tenant {}: Re-checking rider limits", ritrackTenantId);
+    public boolean recheckAndResolveIfPossible(Long ritrackTenantId, Long hargosTenantId, String schemaName) throws Exception {
+        logger.info("Tenant {}: Re-checking rider limits in schema: {}", ritrackTenantId, schemaName);
 
-        Optional<RiderLimitWarningEntity> activeWarning = warningRepository.findActiveWarning();
+        // Validate schema name to prevent SQL injection
+        if (!isValidSchemaName(schemaName)) {
+            logger.error("Invalid schema name: {}", schemaName);
+            throw new IllegalArgumentException("Invalid schema name");
+        }
 
-        if (activeWarning.isEmpty()) {
+        // Find active warning using NATIVE QUERY with EXPLICIT SCHEMA
+        String selectSql = String.format(
+            "SELECT * FROM %s.rider_limit_warnings " +
+            "WHERE is_resolved = false " +
+            "ORDER BY created_at DESC LIMIT 1",
+            schemaName
+        );
+
+        logger.debug("Executing SQL: {}", selectSql);
+
+        List<RiderLimitWarningEntity> results = entityManager
+            .createNativeQuery(selectSql, RiderLimitWarningEntity.class)
+            .getResultList();
+
+        if (results.isEmpty()) {
             logger.debug("Tenant {}: No active warning to resolve", ritrackTenantId);
             return false;
         }
 
+        RiderLimitWarningEntity activeWarning = results.get(0);
+        logger.info("Tenant {}: Found active warning ID={}", ritrackTenantId, activeWarning.getId());
+
         // Count current riders
         int currentCount = countRidersInGlovo(ritrackTenantId);
 
-        // Get current limit
+        // Get current limit from AuthSystem
         HargosAuthClient.TenantInfoResponse tenantInfo = hargosAuthClient.getTenantInfo(hargosTenantId);
         Integer riderLimit = tenantInfo.getRiderLimit();
 
+        logger.info("Tenant {}: Current riders={}, riderLimit={}", ritrackTenantId, currentCount, riderLimit);
+
         // If riderLimit is NULL or within limit -> resolve
         if (riderLimit == null || currentCount <= riderLimit) {
-            RiderLimitWarningEntity warning = activeWarning.get();
-
             String note = String.format(
                 "Auto-resolved: Current riders (%d) now within limit (%s)",
                 currentCount,
                 riderLimit == null ? "unlimited" : riderLimit.toString()
             );
 
-            resolveWarning(warning.getId(), "system", note);
+            // UPDATE using NATIVE QUERY with EXPLICIT SCHEMA
+            String updateSql = String.format(
+                "UPDATE %s.rider_limit_warnings " +
+                "SET is_resolved = true, " +
+                "    resolved_at = CURRENT_TIMESTAMP, " +
+                "    resolved_by = 'system', " +
+                "    resolution_note = :note, " +
+                "    updated_at = CURRENT_TIMESTAMP " +
+                "WHERE id = :warningId",
+                schemaName
+            );
 
-            logger.info("Tenant {}: Warning auto-resolved - current={}, limit={}",
-                ritrackTenantId, currentCount, riderLimit);
+            logger.debug("Executing UPDATE SQL for warning ID={}", activeWarning.getId());
+
+            int updatedRows = entityManager.createNativeQuery(updateSql)
+                .setParameter("note", note)
+                .setParameter("warningId", activeWarning.getId())
+                .executeUpdate();
+
+            entityManager.flush();
+
+            logger.info("Tenant {}: Warning {} auto-resolved ({} rows updated) - current={}, limit={}",
+                ritrackTenantId, activeWarning.getId(), updatedRows, currentCount, riderLimit);
 
             return true;
         }
@@ -304,5 +358,17 @@ public class RiderLimitService {
             ritrackTenantId, currentCount, riderLimit);
 
         return false;
+    }
+
+    /**
+     * Validate schema name to prevent SQL injection.
+     * Schema names should only contain alphanumeric characters, underscores, and hyphens.
+     */
+    private boolean isValidSchemaName(String schemaName) {
+        if (schemaName == null || schemaName.trim().isEmpty()) {
+            return false;
+        }
+        // Allow alphanumeric, underscores, and hyphens only
+        return schemaName.matches("^[a-zA-Z0-9_-]+$");
     }
 }

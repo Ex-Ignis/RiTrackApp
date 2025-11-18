@@ -123,10 +123,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             // 2. Read X-Tenant-Id header
             String tenantIdHeader = request.getHeader("X-Tenant-Id");
 
+            log.info("🔍 [JwtAuthenticationFilter] X-Tenant-Id header: '{}', Available JWT tenants: {}",
+                    tenantIdHeader,
+                    jwtTenants.stream()
+                            .map(t -> "ID=" + t.getTenantId() + " name=" + t.getTenantName())
+                            .collect(Collectors.toList()));
+
             if (tenantIdHeader == null || tenantIdHeader.trim().isEmpty()) {
-                log.debug("No X-Tenant-Id header found - using first tenant from JWT");
+                log.warn("⚠️ [JwtAuthenticationFilter] NO X-Tenant-Id header found - using FIRST tenant from JWT");
                 // Use first tenant by default
                 JwtTenantInfo firstTenant = jwtTenants.get(0);
+                log.warn("⚠️ [JwtAuthenticationFilter] Using DEFAULT tenant: ID={}, name={}",
+                        firstTenant.getTenantId(), firstTenant.getTenantName());
                 setupTenantContext(firstTenant, jwt, request);
                 return;
             }
@@ -203,16 +211,36 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         // Extract user info from JWT
         Long userId = jwtUtil.getUserIdFromToken(jwt);
         String email = jwtUtil.getEmailFromToken(jwt);
+        List<JwtTenantInfo> allJwtTenants = jwtUtil.extractTenants(jwt);
 
-        // Create TenantContext
+        // Map ALL tenants from JWT to RiTrack tenants (for multi-tenant support)
+        List<Long> allTenantIds = new ArrayList<>();
+        List<String> allTenantNames = new ArrayList<>();
+        List<String> allSchemaNames = new ArrayList<>();
+
+        for (JwtTenantInfo jwtT : allJwtTenants) {
+            TenantEntity t = tenantService.findOrCreateByHargosTenantId(
+                    jwtT.getTenantId(),
+                    jwtT.getTenantName()
+            );
+            allTenantIds.add(t.getId());
+            allTenantNames.add(t.getName());
+            allSchemaNames.add(t.getSchemaName());
+        }
+
+        // Create TenantContext with ALL tenants + selectedTenantId
         TenantContext.TenantInfo contextInfo = TenantContext.TenantInfo.builder()
                 .userId(userId)
                 .email(email)
-                .tenantIds(Collections.singletonList(tenant.getId()))  // Internal RiTrack ID
-                .tenantNames(Collections.singletonList(tenant.getName()))
-                .schemaNames(Collections.singletonList(tenant.getSchemaName()))
+                .tenantIds(allTenantIds)  // ALL tenant IDs
+                .tenantNames(allTenantNames)
+                .schemaNames(allSchemaNames)
+                .selectedTenantId(tenant.getId())  // ⭐ SELECTED tenant ID for this request
                 .roles(Collections.singletonList(jwtTenant.getRole()))
                 .build();
+
+        log.info("🎯 [JwtAuthenticationFilter] Setting TenantContext - selectedTenantId: {}, selectedSchema: {}, allTenantIds: {}, allSchemas: {}",
+                tenant.getId(), tenant.getSchemaName(), allTenantIds, allSchemaNames);
 
         TenantContext.setCurrentContext(contextInfo);
 

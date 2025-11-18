@@ -167,6 +167,23 @@ public class TenantSettingsService {
         return contractId;
     }
 
+    /**
+     * Obtiene HargosAuth tenant ID desde la tabla tenants
+     */
+    public Long getHargosTenantId(Long tenantId) {
+        TenantEntity tenant = tenantRepository.findById(tenantId)
+                .orElse(null);
+
+        if (tenant == null) {
+            logger.warn("Tenant {} not found", tenantId);
+            return null;
+        }
+
+        Long hargosTenantId = tenant.getHargosTenantId();
+        logger.debug("Tenant {}: hargosTenantId = {}", tenantId, hargosTenantId);
+        return hargosTenantId;
+    }
+
     // ========================================
     // UPDATE METHODS
     // ========================================

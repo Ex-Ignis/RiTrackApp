@@ -207,32 +207,6 @@ public class TenantOnboardingService {
             tenantRepository.save(tenant);
             logger.info("Tenant {}: Activado exitosamente", tenantId);
 
-            // 9. Validar límites de riders
-            try {
-                logger.info("Tenant {}: Validando límites de riders...", tenantId);
-
-                Long hargosTenantId = tenant.getHargosTenantId();
-
-                if (hargosTenantId == null) {
-                    logger.warn("Tenant {}: No tiene hargosTenantId, saltando validación de límites", tenantId);
-                } else {
-                    var warning = riderLimitService.validateDuringOnboarding(tenantId, hargosTenantId);
-
-                    if (warning != null) {
-                        logger.warn("Tenant {}: ADVERTENCIA DE LÍMITE CREADA - Riders actuales: {}, Límite: {}, Exceso: {}, Expira: {}",
-                                tenantId, warning.getCurrentCount(), warning.getAllowedLimit(),
-                                warning.getExcessCount(), warning.getExpiresAt());
-                    } else {
-                        logger.info("Tenant {}: Sin excesos de límite detectados", tenantId);
-                    }
-                }
-            } catch (Exception e) {
-                // FAIL-SAFE: Si falla la validación, NO bloquear onboarding
-                // pero registrar error para investigación
-                logger.error("Tenant {}: Error validando límites (onboarding continuará): {}",
-                        tenantId, e.getMessage(), e);
-            }
-
             logger.info("Tenant {}: Provisioning completado exitosamente", tenantId);
 
             return OnboardingStatusDto.configured(tenant.getName(), tenant.getSchemaName());
@@ -251,6 +225,41 @@ public class TenantOnboardingService {
             }
 
             throw new Exception("Error durante el provisioning del tenant: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Valida límites de riders DESPUÉS del onboarding (fuera de la transacción principal).
+     * Este método se llama desde el controller después de provisionTenant().
+     *
+     * @param tenantId ID del tenant
+     */
+    public void validateRiderLimitsAfterOnboarding(Long tenantId) {
+        try {
+            logger.info("Tenant {}: Validando límites de riders post-onboarding...", tenantId);
+
+            TenantEntity tenant = tenantRepository.findById(tenantId)
+                    .orElseThrow(() -> new IllegalArgumentException("Tenant no encontrado: " + tenantId));
+
+            Long hargosTenantId = tenant.getHargosTenantId();
+
+            if (hargosTenantId == null) {
+                logger.warn("Tenant {}: No tiene hargosTenantId, saltando validación de límites", tenantId);
+            } else {
+                var warning = riderLimitService.validateDuringOnboarding(tenantId, hargosTenantId);
+
+                if (warning != null) {
+                    logger.warn("Tenant {}: ADVERTENCIA DE LÍMITE CREADA - Riders actuales: {}, Límite: {}, Exceso: {}, Expira: {}",
+                            tenantId, warning.getCurrentCount(), warning.getAllowedLimit(),
+                            warning.getExcessCount(), warning.getExpiresAt());
+                } else {
+                    logger.info("Tenant {}: Sin excesos de límite detectados", tenantId);
+                }
+            }
+        } catch (Exception e) {
+            // FAIL-SAFE: Si falla la validación, solo registrar error
+            logger.error("Tenant {}: Error validando límites post-onboarding: {}",
+                    tenantId, e.getMessage(), e);
         }
     }
 

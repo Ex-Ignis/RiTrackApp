@@ -89,6 +89,12 @@ public class TenantContext {
         private List<String> roles;
 
         /**
+         * The currently selected tenant ID for this request
+         * This is set from the request header or parameter
+         */
+        private Long selectedTenantId;
+
+        /**
          * Check if user has access to a specific tenant
          */
         public boolean hasAccessToTenant(Long tenantId) {
@@ -107,6 +113,25 @@ public class TenantContext {
          */
         public String getFirstSchemaName() {
             return schemaNames != null && !schemaNames.isEmpty() ? schemaNames.get(0) : null;
+        }
+
+        /**
+         * Get the schema name for the selected tenant ID.
+         * This is the correct schema to use for multi-tenant operations.
+         *
+         * @return Schema name for the selected tenant, or first schema as fallback
+         */
+        public String getSelectedSchemaName() {
+            // If there's a selected tenant ID, find its corresponding schema
+            if (selectedTenantId != null && tenantIds != null && schemaNames != null) {
+                int index = tenantIds.indexOf(selectedTenantId);
+                if (index >= 0 && index < schemaNames.size()) {
+                    return schemaNames.get(index);
+                }
+            }
+
+            // Fallback to first schema if no selectedTenantId
+            return getFirstSchemaName();
         }
     }
 }

@@ -58,7 +58,7 @@ public class TenantSettingsController {
         try {
             // Obtener tenantId del contexto (desde JWT)
             TenantContext.TenantInfo tenantInfo = TenantContext.getCurrentContext();
-            Long tenantId = tenantInfo != null ? tenantInfo.getFirstTenantId() : null;
+            Long tenantId = tenantInfo != null ? (tenantInfo.getSelectedTenantId() != null ? tenantInfo.getSelectedTenantId() : tenantInfo.getFirstTenantId()) : null;
 
             if (tenantId == null) {
                 logger.warn("Intento de actualización de settings sin tenantId");
@@ -119,7 +119,7 @@ public class TenantSettingsController {
     public ResponseEntity<?> getSettings() {
         try {
             TenantContext.TenantInfo tenantInfo = TenantContext.getCurrentContext();
-            Long tenantId = tenantInfo != null ? tenantInfo.getFirstTenantId() : null;
+            Long tenantId = tenantInfo != null ? (tenantInfo.getSelectedTenantId() != null ? tenantInfo.getSelectedTenantId() : tenantInfo.getFirstTenantId()) : null;
 
             if (tenantId == null) {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(
@@ -133,6 +133,9 @@ public class TenantSettingsController {
             settings.put("emailBase", settingsService.getEmailBase(tenantId));
             settings.put("nameBase", settingsService.getNameBase(tenantId));
             settings.put("defaultVehicleTypeIds", settingsService.getDefaultVehicleTypeIds(tenantId));
+
+            // Add hargosTenantId for rider limit functionality
+            settings.put("hargosTenantId", settingsService.getHargosTenantId(tenantId));
 
             return ResponseEntity.ok(settings);
 

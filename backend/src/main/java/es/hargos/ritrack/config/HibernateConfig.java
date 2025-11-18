@@ -42,6 +42,7 @@ public class HibernateConfig {
      */
     private static class TenantSchemaConnectionProvider implements org.hibernate.engine.jdbc.connections.spi.MultiTenantConnectionProvider<String> {
 
+        private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger("TenantConnectionProvider");
         private final DataSource dataSource;
 
         public TenantSchemaConnectionProvider(DataSource dataSource) {
@@ -50,6 +51,7 @@ public class HibernateConfig {
 
         @Override
         public Connection getAnyConnection() throws SQLException {
+            logger.warn("⚠️ [ConnectionProvider] getAnyConnection() called - NO tenant context");
             return dataSource.getConnection();
         }
 
@@ -60,14 +62,19 @@ public class HibernateConfig {
 
         @Override
         public Connection getConnection(String tenantIdentifier) throws SQLException {
+            logger.debug("[ConnectionProvider] getConnection() called for tenant: {}", tenantIdentifier);
             Connection connection = dataSource.getConnection();
 
             // Set search_path to tenant schema
             if (tenantIdentifier != null && !tenantIdentifier.isEmpty()) {
                 try (var stmt = connection.createStatement()) {
-                    // Set search_path to: tenant_schema, public (fallback for shared tables)
-                    stmt.execute("SET search_path TO " + tenantIdentifier + ", public");
+                    String sql = "SET search_path TO " + tenantIdentifier + ", public";
+                    logger.debug("[ConnectionProvider] Executing: {}", sql);
+                    stmt.execute(sql);
+                    logger.debug("[ConnectionProvider] search_path set successfully to: {}", tenantIdentifier);
                 }
+            } else {
+                logger.debug("[ConnectionProvider] tenantIdentifier is null or empty, NOT setting search_path");
             }
 
             return connection;
@@ -75,6 +82,7 @@ public class HibernateConfig {
 
         @Override
         public void releaseConnection(String tenantIdentifier, Connection connection) throws SQLException {
+            logger.debug("🔓 [ConnectionProvider] Releasing connection for tenant: {}", tenantIdentifier);
             // Reset search_path to default before returning to pool
             try (var stmt = connection.createStatement()) {
                 stmt.execute("SET search_path TO public");
@@ -105,15 +113,37 @@ public class HibernateConfig {
     public org.hibernate.context.spi.CurrentTenantIdentifierResolver<String> currentTenantIdentifierResolver() {
         return new org.hibernate.context.spi.CurrentTenantIdentifierResolver<String>() {
 
+            private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger("TenantIdentifierResolver");
+
             @Override
             public String resolveCurrentTenantIdentifier() {
                 TenantContext.TenantInfo tenantInfo = TenantContext.getCurrentContext();
 
-                if (tenantInfo != null && tenantInfo.getFirstSchemaName() != null) {
-                    return tenantInfo.getFirstSchemaName();
+                if (tenantInfo != null) {
+                    logger.info("🔍 [HibernateConfig] TenantContext found - selectedTenantId: {}, tenantIds: {}, schemaNames: {}",
+                        tenantInfo.getSelectedTenantId(),
+                        tenantInfo.getTenantIds(),
+                        tenantInfo.getSchemaNames());
+
+                    // IMPORTANTE: Usar getSelectedSchemaName() en lugar de getFirstSchemaName()
+                    // para respetar el tenant seleccionado por el usuario
+                    String schemaName = tenantInfo.getSelectedSchemaName();
+
+                    if (schemaName != null && !schemaName.isEmpty()) {
+                        logger.info("✅ [HibernateConfig] Resolved tenant schema: {}", schemaName);
+                        return schemaName;
+                    }
+
+                    // Fallback al primer schema si no hay selectedSchema
+                    if (tenantInfo.getFirstSchemaName() != null) {
+                        logger.warn("⚠️ [HibernateConfig] No selectedSchemaName found, falling back to first schema: {}",
+                            tenantInfo.getFirstSchemaName());
+                        return tenantInfo.getFirstSchemaName();
+                    }
                 }
 
                 // Default to public schema if no tenant context
+                logger.debug("[HibernateConfig] No tenant context found, defaulting to 'public' schema");
                 return "public";
             }
 

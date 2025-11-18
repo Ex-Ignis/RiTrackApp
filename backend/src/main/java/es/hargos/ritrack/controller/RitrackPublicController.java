@@ -62,8 +62,54 @@ public class RitrackPublicController {
         }
     }
 
+    /**
+     * Re-check rider limits and resolve warning if tenant is now within limit.
+     * Called by HargosAuth after subscription update.
+     *
+     * @param hargosTenantId HargosAuth tenant ID
+     * @return Result of the recheck operation
+     */
+    @PostMapping("/tenant/{hargosTenantId}/recheck-limits")
+    public ResponseEntity<RecheckLimitsResponse> recheckLimits(@PathVariable Long hargosTenantId) {
+        logger.info("HargosAuth requesting limit recheck for hargosTenantId={}", hargosTenantId);
+
+        try {
+            // Find RiTrack tenant by HargosAuth tenant ID
+            TenantEntity tenant = tenantRepository.findByHargosTenantId(hargosTenantId)
+                    .orElse(null);
+
+            if (tenant == null) {
+                logger.warn("Tenant with hargosTenantId={} not found in RiTrack", hargosTenantId);
+                return ResponseEntity.ok(new RecheckLimitsResponse(false, "Tenant no configurado en RiTrack"));
+            }
+
+            // Re-check limits and resolve if possible using explicit schema
+            boolean resolved = riderLimitService.recheckAndResolveIfPossible(
+                    tenant.getId(),
+                    hargosTenantId,
+                    tenant.getSchemaName()
+            );
+
+            if (resolved) {
+                logger.info("HargosAuth tenant {}: Warning resolved after limit update", hargosTenantId);
+                return ResponseEntity.ok(new RecheckLimitsResponse(true, "Warning resuelto - ahora dentro del límite"));
+            } else {
+                logger.info("HargosAuth tenant {}: No warning to resolve or still exceeds limit", hargosTenantId);
+                return ResponseEntity.ok(new RecheckLimitsResponse(false, "Sin cambios - no hay warning activo o aún excede el límite"));
+            }
+
+        } catch (Exception e) {
+            logger.error("Error rechecking limits for hargosTenantId={}: {}", hargosTenantId, e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new RecheckLimitsResponse(false, "Error al re-verificar límites: " + e.getMessage()));
+        }
+    }
+
     // ==================== DTOs ====================
 
     public record RiderCountResponse(Integer riderCount, String message) {
+    }
+
+    public record RecheckLimitsResponse(boolean resolved, String message) {
     }
 }

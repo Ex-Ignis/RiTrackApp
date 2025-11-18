@@ -142,12 +142,23 @@ public class TenantService {
     public Optional<GlovoCredentialsEntity> getCurrentTenantGlovoCredentials() {
         TenantContext.TenantInfo context = TenantContext.getCurrentContext();
 
-        if (context == null || context.getFirstTenantId() == null) {
+        if (context == null) {
             log.warn("No tenant context found when fetching Glovo credentials");
             return Optional.empty();
         }
 
-        return getGlovoCredentials(context.getFirstTenantId());
+        // 🔥 CRÍTICO: Usar selectedTenantId (del header X-Tenant-Id), NO el primer tenant
+        Long tenantId = context.getSelectedTenantId();
+        if (tenantId == null) {
+            tenantId = context.getFirstTenantId();
+        }
+
+        if (tenantId == null) {
+            log.warn("No tenant ID found in context when fetching Glovo credentials");
+            return Optional.empty();
+        }
+
+        return getGlovoCredentials(tenantId);
     }
 
     /**

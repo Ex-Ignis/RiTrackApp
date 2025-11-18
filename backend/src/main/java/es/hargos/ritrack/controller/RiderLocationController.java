@@ -43,7 +43,7 @@ public class RiderLocationController {
     public ResponseEntity<?> getCurrentLocations() {
         // Extraer tenantId del contexto
         TenantContext.TenantInfo tenantInfo = TenantContext.getCurrentContext();
-        Long tenantId = tenantInfo != null ? tenantInfo.getFirstTenantId() : null;
+        Long tenantId = tenantInfo != null ? (tenantInfo.getSelectedTenantId() != null ? tenantInfo.getSelectedTenantId() : tenantInfo.getFirstTenantId()) : null;
 
         if (tenantId == null) {
             Map<String, String> error = new HashMap<>();
@@ -69,7 +69,7 @@ public class RiderLocationController {
     public ResponseEntity<?> getCurrentLocationsByCity(@PathVariable Integer cityId) {
         // Extraer tenantId del contexto
         TenantContext.TenantInfo tenantInfo = TenantContext.getCurrentContext();
-        Long tenantId = tenantInfo != null ? tenantInfo.getFirstTenantId() : null;
+        Long tenantId = tenantInfo != null ? (tenantInfo.getSelectedTenantId() != null ? tenantInfo.getSelectedTenantId() : tenantInfo.getFirstTenantId()) : null;
 
         if (tenantId == null) {
             Map<String, String> error = new HashMap<>();
@@ -94,7 +94,7 @@ public class RiderLocationController {
     public ResponseEntity<?> getCurrentLocationsByAllCities() {
         // Extraer tenantId del contexto
         TenantContext.TenantInfo tenantInfo = TenantContext.getCurrentContext();
-        Long tenantId = tenantInfo != null ? tenantInfo.getFirstTenantId() : null;
+        Long tenantId = tenantInfo != null ? (tenantInfo.getSelectedTenantId() != null ? tenantInfo.getSelectedTenantId() : tenantInfo.getFirstTenantId()) : null;
 
         if (tenantId == null) {
             Map<String, String> error = new HashMap<>();
@@ -120,7 +120,7 @@ public class RiderLocationController {
     public ResponseEntity<?> getRidersWithActiveDeliveries() {
         // Extraer tenantId del contexto
         TenantContext.TenantInfo tenantInfo = TenantContext.getCurrentContext();
-        Long tenantId = tenantInfo != null ? tenantInfo.getFirstTenantId() : null;
+        Long tenantId = tenantInfo != null ? (tenantInfo.getSelectedTenantId() != null ? tenantInfo.getSelectedTenantId() : tenantInfo.getFirstTenantId()) : null;
 
         if (tenantId == null) {
             Map<String, String> error = new HashMap<>();
@@ -151,7 +151,7 @@ public class RiderLocationController {
     public ResponseEntity<?> getRidersWithActiveDeliveriesByCity(@PathVariable Integer cityId) {
         // Extraer tenantId del contexto
         TenantContext.TenantInfo tenantInfo = TenantContext.getCurrentContext();
-        Long tenantId = tenantInfo != null ? tenantInfo.getFirstTenantId() : null;
+        Long tenantId = tenantInfo != null ? (tenantInfo.getSelectedTenantId() != null ? tenantInfo.getSelectedTenantId() : tenantInfo.getFirstTenantId()) : null;
 
         if (tenantId == null) {
             Map<String, String> error = new HashMap<>();
@@ -179,7 +179,7 @@ public class RiderLocationController {
     public ResponseEntity<?> getLocationsByStatus(@PathVariable String status) {
         // Extraer tenantId del contexto
         TenantContext.TenantInfo tenantInfo = TenantContext.getCurrentContext();
-        Long tenantId = tenantInfo != null ? tenantInfo.getFirstTenantId() : null;
+        Long tenantId = tenantInfo != null ? (tenantInfo.getSelectedTenantId() != null ? tenantInfo.getSelectedTenantId() : tenantInfo.getFirstTenantId()) : null;
 
         if (tenantId == null) {
             Map<String, String> error = new HashMap<>();
@@ -211,7 +211,7 @@ public class RiderLocationController {
             @PathVariable Integer cityId, @PathVariable String status) {
         // Extraer tenantId del contexto
         TenantContext.TenantInfo tenantInfo = TenantContext.getCurrentContext();
-        Long tenantId = tenantInfo != null ? tenantInfo.getFirstTenantId() : null;
+        Long tenantId = tenantInfo != null ? (tenantInfo.getSelectedTenantId() != null ? tenantInfo.getSelectedTenantId() : tenantInfo.getFirstTenantId()) : null;
 
         if (tenantId == null) {
             Map<String, String> error = new HashMap<>();
@@ -283,7 +283,7 @@ public class RiderLocationController {
     public ResponseEntity<?> getStats() {
         // Extraer tenantId del contexto
         TenantContext.TenantInfo tenantInfo = TenantContext.getCurrentContext();
-        Long tenantId = tenantInfo != null ? tenantInfo.getFirstTenantId() : null;
+        Long tenantId = tenantInfo != null ? (tenantInfo.getSelectedTenantId() != null ? tenantInfo.getSelectedTenantId() : tenantInfo.getFirstTenantId()) : null;
 
         if (tenantId == null) {
             Map<String, String> error = new HashMap<>();
@@ -350,7 +350,7 @@ public class RiderLocationController {
         try {
             // MULTI-TENANT: Obtener tenantId del contexto
             TenantContext.TenantInfo tenantInfo = TenantContext.getCurrentContext();
-            Long tenantId = tenantInfo != null ? tenantInfo.getFirstTenantId() : null;
+            Long tenantId = tenantInfo != null ? (tenantInfo.getSelectedTenantId() != null ? tenantInfo.getSelectedTenantId() : tenantInfo.getFirstTenantId()) : null;
 
             if (tenantId == null) {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED)

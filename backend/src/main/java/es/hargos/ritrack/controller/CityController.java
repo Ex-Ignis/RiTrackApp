@@ -51,7 +51,7 @@ public class CityController {
 
         // Extract tenant from context
         TenantContext.TenantInfo tenantInfo = TenantContext.getCurrentContext();
-        Long tenantId = tenantInfo != null ? tenantInfo.getFirstTenantId() : null;
+        Long tenantId = tenantInfo != null ? (tenantInfo.getSelectedTenantId() != null ? tenantInfo.getSelectedTenantId() : tenantInfo.getFirstTenantId()) : null;
 
         if (tenantId == null) {
             logger.warn("Tenant ID not found in context");
