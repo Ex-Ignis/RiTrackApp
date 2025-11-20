@@ -66,6 +66,7 @@ public class TenantOnboardingService {
     private final FileStorageService fileStorageService;
     private final TenantSchemaService schemaService;
     private final GlovoClient glovoClient;
+    private final RiderLimitService riderLimitService;
     private final RestTemplate restTemplate;
 
     @Autowired
@@ -74,13 +75,15 @@ public class TenantOnboardingService {
                                      TenantSettingsRepository settingsRepository,
                                      FileStorageService fileStorageService,
                                      TenantSchemaService schemaService,
-                                     GlovoClient glovoClient) {
+                                     GlovoClient glovoClient,
+                                     RiderLimitService riderLimitService) {
         this.tenantRepository = tenantRepository;
         this.credentialsRepository = credentialsRepository;
         this.settingsRepository = settingsRepository;
         this.fileStorageService = fileStorageService;
         this.schemaService = schemaService;
         this.glovoClient = glovoClient;
+        this.riderLimitService = riderLimitService;
         this.restTemplate = new RestTemplate();
     }
 
@@ -222,6 +225,41 @@ public class TenantOnboardingService {
             }
 
             throw new Exception("Error durante el provisioning del tenant: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Valida límites de riders DESPUÉS del onboarding (fuera de la transacción principal).
+     * Este método se llama desde el controller después de provisionTenant().
+     *
+     * @param tenantId ID del tenant
+     */
+    public void validateRiderLimitsAfterOnboarding(Long tenantId) {
+        try {
+            logger.info("Tenant {}: Validando límites de riders post-onboarding...", tenantId);
+
+            TenantEntity tenant = tenantRepository.findById(tenantId)
+                    .orElseThrow(() -> new IllegalArgumentException("Tenant no encontrado: " + tenantId));
+
+            Long hargosTenantId = tenant.getHargosTenantId();
+
+            if (hargosTenantId == null) {
+                logger.warn("Tenant {}: No tiene hargosTenantId, saltando validación de límites", tenantId);
+            } else {
+                var warning = riderLimitService.validateDuringOnboarding(tenantId, hargosTenantId);
+
+                if (warning != null) {
+                    logger.warn("Tenant {}: ADVERTENCIA DE LÍMITE CREADA - Riders actuales: {}, Límite: {}, Exceso: {}, Expira: {}",
+                            tenantId, warning.getCurrentCount(), warning.getAllowedLimit(),
+                            warning.getExcessCount(), warning.getExpiresAt());
+                } else {
+                    logger.info("Tenant {}: Sin excesos de límite detectados", tenantId);
+                }
+            }
+        } catch (Exception e) {
+            // FAIL-SAFE: Si falla la validación, solo registrar error
+            logger.error("Tenant {}: Error validando límites post-onboarding: {}",
+                    tenantId, e.getMessage(), e);
         }
     }
 
@@ -828,6 +866,12 @@ public class TenantOnboardingService {
             // Default: Bike, Car, Motorbike, Scooter
             saveSetting(tenant, "default_vehicle_type_ids", "5,1,3,2", "JSON", "Tipos de vehículo por defecto");
         }
+
+        // auto_block_enabled (DESACTIVADO por defecto)
+        saveSetting(tenant, "auto_block_enabled", "false", "BOOLEAN", "Activar bloqueo automático por saldo de cash alto");
+
+        // auto_block_cash_limit (límite por defecto: 150€)
+        saveSetting(tenant, "auto_block_cash_limit", "150.00", "NUMBER", "Límite de cash en € para bloqueo automático");
     }
 
     /**

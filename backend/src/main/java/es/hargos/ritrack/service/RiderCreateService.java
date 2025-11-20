@@ -18,16 +18,15 @@ public class RiderCreateService {
 
     private static final Logger logger = LoggerFactory.getLogger(RiderCreateService.class);
 
-    // TODO: Eliminar este valor por defecto y obtener contract_id de tenant_settings
-    @Value("${contract.id:344}")
-    private Integer defaultContractId;
-
     @Value("#{${rider.default.starting-points:T(java.util.Collections).emptyMap()}}")
     private Map<String, List<Integer>> defaultStartingPointsByCity;
 
     private final GlovoClient glovoClient;
     private final RoosterCacheService roosterCache;
     private final TenantSettingsService tenantSettingsService;
+    private final CityService cityService;
+    private final RiderLimitService riderLimitService;
+    private final es.hargos.ritrack.repository.TenantRepository tenantRepository;
 
     // Contador en memoria para emails (se reinicia con cada restart)
     private final AtomicInteger emailCounter = new AtomicInteger(1000);
@@ -35,10 +34,16 @@ public class RiderCreateService {
     @Autowired
     public RiderCreateService(GlovoClient glovoClient,
                               RoosterCacheService roosterCache,
-                              TenantSettingsService tenantSettingsService) {
+                              TenantSettingsService tenantSettingsService,
+                              CityService cityService,
+                              RiderLimitService riderLimitService,
+                              es.hargos.ritrack.repository.TenantRepository tenantRepository) {
         this.glovoClient = glovoClient;
         this.roosterCache = roosterCache;
         this.tenantSettingsService = tenantSettingsService;
+        this.cityService = cityService;
+        this.riderLimitService = riderLimitService;
+        this.tenantRepository = tenantRepository;
     }
 
 
@@ -102,6 +107,25 @@ public class RiderCreateService {
     public Map<String, Object> createRider(Long tenantId, RiderCreateDto createData) throws Exception {
         logger.info("Tenant {}: Iniciando creación de rider", tenantId);
 
+        // VALIDAR LÍMITES DE RIDERS ANTES DE CUALQUIER OPERACIÓN
+        var tenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> new IllegalArgumentException("Tenant no encontrado: " + tenantId));
+
+        Long hargosTenantId = tenant.getHargosTenantId();
+
+        if (hargosTenantId != null) {
+            try {
+                riderLimitService.validateBeforeCreatingRider(tenantId, hargosTenantId);
+                logger.debug("Tenant {}: Validación de límites OK", tenantId);
+            } catch (IllegalStateException e) {
+                // Re-lanzar con mensaje claro para el frontend
+                logger.error("Tenant {}: Creación bloqueada por límite - {}", tenantId, e.getMessage());
+                throw e;
+            }
+        } else {
+            logger.warn("Tenant {}: No tiene hargosTenantId, saltando validación de límites", tenantId);
+        }
+
         // Si no viene nombre o está vacío, generarlo automáticamente
         if (createData.getName() == null || createData.getName().trim().isEmpty()) {
             String generatedName = generateNextName(tenantId);
@@ -153,7 +177,7 @@ public class RiderCreateService {
         logAssignedValues(tenantId, payload);
 
         // Enviar a la API
-        Object result = glovoClient.crearEmpleado(tenantId, payload);
+        Object result = glovoClient.createEmployee(tenantId, payload);
 
         // Limpiar caché para reflejar cambios
         roosterCache.clearCache(tenantId);
@@ -197,11 +221,11 @@ public class RiderCreateService {
         // ===== CONTRATO (REQUERIDO) =====
         Map<String, Object> contractPayload = new HashMap<>();
 
-        // contract_id: usar el proporcionado o el valor por defecto
+        // contract_id: usar el proporcionado o el valor por defecto del tenant
         Integer contractId = data.getContract().getContractId();
         if (contractId == null || contractId <= 0) {
-            contractId = defaultContractId;
-            logger.info("Contract ID asignado por defecto: {}", contractId);
+            contractId = tenantSettingsService.getContractId(tenantId);
+            logger.info("Tenant {}: Contract ID obtenido desde tenant_settings: {}", tenantId, contractId);
         }
         contractPayload.put("contract_id", contractId);
 
@@ -246,24 +270,30 @@ public class RiderCreateService {
         }
         payload.put("vehicle_type_ids", vehicleTypeIds);
 
-        // starting_point_ids: usar los proporcionados o buscar por ciudad
+        // starting_point_ids: obtener TODOS los starting points de la ciudad desde Glovo API
         List<Integer> startingPointIds = data.getStartingPointIds();
+
+        // Si el frontend NO envió starting points, obtenerlos automáticamente
         if (startingPointIds == null || startingPointIds.isEmpty()) {
             // Obtener la ciudad del contrato
             Integer cityId = data.getContract().getCityId();
             if (cityId != null) {
-                // Buscar starting points por defecto para esta ciudad
-                List<Integer> defaultPoints = defaultStartingPointsByCity.get(cityId.toString());
-                if (defaultPoints != null && !defaultPoints.isEmpty()) {
-                    startingPointIds = new ArrayList<>(defaultPoints);
-                    logger.info("Starting points asignados automáticamente para ciudad {}: {}",
-                            cityId, startingPointIds);
-                } else {
-                    logger.info("No hay starting points por defecto para ciudad {}", cityId);
+                try {
+                    // Consultar Glovo API para obtener TODOS los starting points de la ciudad
+                    startingPointIds = cityService.getStartingPointIds(tenantId, cityId);
+                    logger.info("Tenant {}: Starting points obtenidos automáticamente desde Glovo API para ciudad {}: {} puntos",
+                            tenantId, cityId, startingPointIds.size());
+                } catch (Exception e) {
+                    logger.error("Tenant {}: Error obteniendo starting points desde Glovo API para ciudad {}: {}",
+                            tenantId, cityId, e.getMessage());
+                    // Fallback a valores vacíos si falla la API
                     startingPointIds = new ArrayList<>();
                 }
             }
+        } else {
+            logger.info("Tenant {}: Starting points proporcionados por el frontend: {}", tenantId, startingPointIds);
         }
+
         if (startingPointIds != null && !startingPointIds.isEmpty()) {
             payload.put("starting_point_ids", startingPointIds);
         }

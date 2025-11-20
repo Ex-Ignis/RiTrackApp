@@ -111,29 +111,6 @@ BEGIN
     -- Set search path
     EXECUTE format('SET search_path TO %I, public', tenant_schema_name);
 
-    -- Create riders table
-    EXECUTE format('
-        CREATE TABLE IF NOT EXISTS %I.riders (
-            id BIGSERIAL PRIMARY KEY,
-            employee_id VARCHAR(255) UNIQUE NOT NULL,
-            full_name VARCHAR(255) NOT NULL,
-            email VARCHAR(255) UNIQUE NOT NULL,
-            phone VARCHAR(50),
-            dni VARCHAR(20),
-            city_id INTEGER NOT NULL,
-            city_name VARCHAR(255),
-            contract_type VARCHAR(100),
-            status VARCHAR(50),
-            vehicle_type INTEGER,
-            vehicle_type_name VARCHAR(100),
-            starting_point_id INTEGER,
-            starting_point_name VARCHAR(255),
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_synced_at TIMESTAMP
-        )
-    ', tenant_schema_name);
-
     -- Create rider_metrics_csv table (imported from CSV files)
     EXECUTE format('
         CREATE TABLE IF NOT EXISTS %I.rider_metrics_csv (
@@ -159,30 +136,6 @@ BEGIN
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
             UNIQUE (employee_id, date)
-        )
-    ', tenant_schema_name);
-
-    -- Create daily_deliveries table (synchronized from Glovo Live API)
-    EXECUTE format('
-        CREATE TABLE IF NOT EXISTS %I.daily_deliveries (
-            id BIGSERIAL PRIMARY KEY,
-            rider_id VARCHAR(255) NOT NULL,
-            date DATE NOT NULL,
-            completed_deliveries INTEGER,
-            cancelled_deliveries INTEGER,
-            accepted_deliveries INTEGER,
-            total_worked_seconds INTEGER,
-            total_break_seconds INTEGER,
-            last_session_deliveries INTEGER,
-            last_session_cancelled INTEGER,
-            last_session_worked_seconds INTEGER,
-            utilization_rate DOUBLE PRECISION,
-            acceptance_rate DOUBLE PRECISION,
-            last_update_time TIMESTAMP,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-            UNIQUE (rider_id, date)
         )
     ', tenant_schema_name);
 
@@ -256,28 +209,12 @@ BEGIN
         )
     ', tenant_schema_name);
 
-    -- Create indexes for riders
-    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_riders_employee_id ON %I.riders(employee_id)',
-        tenant_schema_name, tenant_schema_name);
-    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_riders_city_id ON %I.riders(city_id)',
-        tenant_schema_name, tenant_schema_name);
-    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_riders_status ON %I.riders(status)',
-        tenant_schema_name, tenant_schema_name);
-    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_riders_email ON %I.riders(email)',
-        tenant_schema_name, tenant_schema_name);
-
     -- Create indexes for metrics
     EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_metrics_csv_employee_date ON %I.rider_metrics_csv(employee_id, date)',
         tenant_schema_name, tenant_schema_name);
     EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_metrics_csv_date ON %I.rider_metrics_csv(date DESC)',
         tenant_schema_name, tenant_schema_name);
     EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_metrics_csv_city_date ON %I.rider_metrics_csv(city_id, date)',
-        tenant_schema_name, tenant_schema_name);
-
-    -- Create indexes for daily_deliveries
-    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_daily_deliveries_rider_date ON %I.daily_deliveries(rider_id, date)',
-        tenant_schema_name, tenant_schema_name);
-    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_daily_deliveries_date ON %I.daily_deliveries(date DESC)',
         tenant_schema_name, tenant_schema_name);
 
     -- Create indexes for rider_metrics_daily
@@ -290,6 +227,94 @@ BEGIN
     EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_metrics_weekly_rider_week ON %I.rider_metrics_weekly(rider_id, week)',
         tenant_schema_name, tenant_schema_name);
     EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_metrics_weekly_week ON %I.rider_metrics_weekly(week DESC)',
+        tenant_schema_name, tenant_schema_name);
+
+    -- Create rider_block_status table (auto-block by cash balance)
+    EXECUTE format('
+        CREATE TABLE IF NOT EXISTS %I.rider_block_status (
+            employee_id VARCHAR(255) PRIMARY KEY,
+            is_auto_blocked BOOLEAN NOT NULL DEFAULT false,
+            is_manual_blocked BOOLEAN NOT NULL DEFAULT false,
+            last_balance NUMERIC(10, 2),
+            last_balance_check TIMESTAMP,
+            auto_blocked_at TIMESTAMP,
+            auto_unblocked_at TIMESTAMP,
+            manual_blocked_at TIMESTAMP,
+            manual_blocked_by_user_id BIGINT,
+            manual_block_reason TEXT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    ', tenant_schema_name);
+
+    -- Create indexes for rider_block_status
+    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_rider_block_status_is_auto_blocked ON %I.rider_block_status(is_auto_blocked)',
+        tenant_schema_name, tenant_schema_name);
+    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_rider_block_status_last_balance_check ON %I.rider_block_status(last_balance_check DESC)',
+        tenant_schema_name, tenant_schema_name);
+
+    -- Create auto_block_city_config table (per-city auto-block configuration)
+    EXECUTE format('
+        CREATE TABLE IF NOT EXISTS %I.auto_block_city_config (
+            id BIGSERIAL PRIMARY KEY,
+            city_id INTEGER NOT NULL UNIQUE,
+            enabled BOOLEAN NOT NULL DEFAULT false,
+            cash_limit NUMERIC(10, 2) NOT NULL DEFAULT 150.00,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+            CHECK (cash_limit > 0),
+            CHECK (city_id > 0)
+        )
+    ', tenant_schema_name);
+
+    -- Create indexes for auto_block_city_config
+    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_auto_block_city_config_city_id ON %I.auto_block_city_config(city_id)',
+        tenant_schema_name, tenant_schema_name);
+    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_auto_block_city_config_enabled ON %I.auto_block_city_config(enabled) WHERE enabled = true',
+        tenant_schema_name, tenant_schema_name);
+
+    -- Create user_city_assignments table (city access control per user)
+    EXECUTE format('
+        CREATE TABLE IF NOT EXISTS %I.user_city_assignments (
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL,
+            city_id BIGINT NOT NULL,
+            assigned_by_user_id BIGINT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+            UNIQUE(user_id, city_id),
+            CHECK (user_id > 0)
+        )
+    ', tenant_schema_name);
+
+    -- Create indexes for user_city_assignments
+    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_user_city_user ON %I.user_city_assignments(user_id)',
+        tenant_schema_name, tenant_schema_name);
+    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_user_city_city ON %I.user_city_assignments(city_id)',
+        tenant_schema_name, tenant_schema_name);
+
+    -- Create rider_limit_warnings table (warnings when tenant exceeds rider limit)
+    EXECUTE format('
+        CREATE TABLE IF NOT EXISTS %I.rider_limit_warnings (
+            id BIGSERIAL PRIMARY KEY,
+            current_count INTEGER NOT NULL,
+            allowed_limit INTEGER NOT NULL,
+            excess_count INTEGER NOT NULL,
+            is_resolved BOOLEAN NOT NULL DEFAULT false,
+            resolved_at TIMESTAMP,
+            resolved_by TEXT,
+            resolution_note TEXT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            expires_at TIMESTAMP
+        )
+    ', tenant_schema_name);
+
+    -- Create indexes for rider_limit_warnings
+    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_rider_limit_warnings_resolved ON %I.rider_limit_warnings(is_resolved, created_at DESC)',
+        tenant_schema_name, tenant_schema_name);
+    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_rider_limit_warnings_created ON %I.rider_limit_warnings(created_at DESC)',
         tenant_schema_name, tenant_schema_name);
 
     -- Grant permissions
@@ -355,7 +380,14 @@ SELECT setval('public.tenants_id_seq', (SELECT MAX(id) FROM public.tenants));
 --   2. Guarda .pem en ./keys/tenant_{id}.pem
 --   3. Inserta en public.glovo_credentials
 --   4. Crea schema PostgreSQL con create_tenant_schema()
---   5. Inserta settings en public.tenant_settings
+--      - rider_metrics_csv, rider_metrics_daily, rider_metrics_weekly
+--      - rider_block_status (auto-bloqueo por cash)
+--   5. Inserta settings en public.tenant_settings:
+--      - active_city_ids
+--      - rider_email_domain, rider_email_base, rider_name_base
+--      - default_vehicle_type_ids
+--      - auto_block_enabled = false (DESACTIVADO por defecto)
+--      - auto_block_cash_limit = 150.00 (límite por defecto)
 --   6. Activa el tenant (is_active = true)
 --
 -- ==============================================

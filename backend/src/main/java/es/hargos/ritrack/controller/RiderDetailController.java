@@ -48,7 +48,7 @@ public class RiderDetailController {
     public ResponseEntity<?> getRiderDetails(@PathVariable Integer riderId) {
         // Extraer tenantId del contexto
         TenantContext.TenantInfo tenantInfo = TenantContext.getCurrentContext();
-        Long tenantId = tenantInfo != null ? tenantInfo.getFirstTenantId() : null;
+        Long tenantId = tenantInfo != null ? (tenantInfo.getSelectedTenantId() != null ? tenantInfo.getSelectedTenantId() : tenantInfo.getFirstTenantId()) : null;
 
         if (tenantId == null) {
             Map<String, String> error = new HashMap<>();

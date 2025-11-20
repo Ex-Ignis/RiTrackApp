@@ -40,7 +40,7 @@ public class RiderDetailService {
 
         try {
             // PASO 1: Obtener datos de Rooster API
-            Object roosterData = glovoClient.obtenerEmpleadoPorId(tenantId, riderId);
+            Object roosterData = glovoClient.getEmployeeById(tenantId, riderId);
 
             if (roosterData == null) {
                 logger.warn("Tenant {}: No se encontraron datos de Rooster para rider {}", tenantId, riderId);
@@ -48,7 +48,7 @@ public class RiderDetailService {
             }
 
             // PASO 2: Obtener datos de Live API directamente sin city_id
-            Object liveData = glovoClient.obtenerRiderLiveData(tenantId, riderId);
+            Object liveData = glovoClient.getRiderLiveData(tenantId, riderId);
 
             // PASO 3: Combinar datos de ambas fuentes
             RiderDetailDto riderDetail = combineRoosterAndLiveData(roosterData, liveData);
@@ -401,11 +401,16 @@ public class RiderDetailService {
         }
 
         // Información adicional del nuevo formato
+        // ⚠️ IMPORTANTE: Live API devuelve zone.id (ej: 305) que NO es lo mismo que city_id (ej: 804)
+        // cityId ya fue asignado correctamente desde Rooster API (active_contract.city_id)
+        // Solo tomamos cityName de zone.name, NUNCA sobrescribir cityId con zone.id
         @SuppressWarnings("unchecked")
         Map<String, Object> zone = (Map<String, Object>) dataMap.get("zone");
         if (zone != null) {
-            builder.cityId((Integer) zone.get("id"));
+            // ✅ Solo asignar cityName, NO cityId
             builder.cityName((String) zone.get("name"));
+            // ❌ NO HACER: builder.cityId((Integer) zone.get("id"));
+            //    zone.id es el ID de la zona (305), no el city_id correcto (804)
         }
 
         // Company ID
@@ -530,8 +535,8 @@ public class RiderDetailService {
 
         try {
             // Obtener datos de ambas APIs (cityId ya no es necesario para Live)
-            Object roosterData = glovoClient.obtenerEmpleadoPorId(tenantId, riderId);
-            Object liveData = glovoClient.obtenerRiderLiveData(tenantId, riderId);
+            Object roosterData = glovoClient.getEmployeeById(tenantId, riderId);
+            Object liveData = glovoClient.getRiderLiveData(tenantId, riderId);
 
             // Combinar datos
             if (roosterData == null && liveData == null) {
@@ -577,5 +582,46 @@ public class RiderDetailService {
         builder.lastUpdated(LocalDateTime.now());
 
         return builder.build();
+    }
+
+    /**
+     * Obtiene solo el cityId del rider desde Rooster API
+     * Útil para operaciones que solo necesitan saber la ciudad (ej: desbloquear)
+     *
+     * @param tenantId ID del tenant
+     * @param riderId ID del rider
+     * @return cityId del rider o null si no se encuentra
+     * @throws Exception si hay error en la consulta
+     */
+    public Integer getRiderCityId(Long tenantId, Integer riderId) throws Exception {
+        logger.info("Tenant {}: Obteniendo cityId para rider {}", tenantId, riderId);
+
+        try {
+            Object roosterData = glovoClient.getEmployeeById(tenantId, riderId);
+
+            if (roosterData == null) {
+                logger.warn("Tenant {}: No se encontró rider {} en Rooster API", tenantId, riderId);
+                return null;
+            }
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> dataMap = (Map<String, Object>) roosterData;
+
+            // ✅ Extraer city_id del nivel raíz
+            Integer cityId = (Integer) dataMap.get("city_id");
+
+            if (cityId != null) {
+                logger.info("Tenant {}: Rider {} tiene cityId: {}", tenantId, riderId, cityId);
+                return cityId;
+            }
+
+            logger.warn("Tenant {}: Rider {} no tiene city_id", tenantId, riderId);
+            return null;
+
+        } catch (Exception e) {
+            logger.error("Tenant {}: Error obteniendo cityId para rider {}: {}",
+                tenantId, riderId, e.getMessage());
+            throw e;
+        }
     }
 }

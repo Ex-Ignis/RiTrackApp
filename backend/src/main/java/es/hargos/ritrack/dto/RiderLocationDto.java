@@ -28,6 +28,14 @@ public class RiderLocationDto {
     private String phoneNumber;
     private String operationalPhoneNumber;
 
+    // Wallet info - Para sistema de auto-bloqueo
+    private Double walletBalance;
+    private String walletLimitStatus;  // "balance_under_soft_limit", etc.
+
+    // Block status
+    private Boolean isAutoBlocked;     // Bloqueado automáticamente por saldo alto
+    private Boolean isManualBlocked;   // Bloqueado manualmente por admin
+
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime lastUpdate;
 

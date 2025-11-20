@@ -61,7 +61,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             String jwt = extractJwtFromRequest(request);
 
             if (jwt != null && jwtUtil.validateToken(jwt)) {
-                authenticateUser(jwt, request);
+                authenticateUser(jwt, request, response);
             } else {
                 log.debug("No valid JWT token found in request to {}", request.getRequestURI());
             }
@@ -93,30 +93,48 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     /**
      * Authenticate user and populate TenantContext.
      *
-     * New flow with X-Tenant-Id header:
-     * 1. Extract tenants from JWT
-     * 2. Read X-Tenant-Id header from request
-     * 3. Validate header value is in JWT's tenant list
-     * 4. Find or create tenant in RiTrack
-     * 5. Set TenantContext with selected tenant
+     * Flow:
+     * 1. Check if user has global role (SUPER_ADMIN)
+     * 2. If SUPER_ADMIN, authenticate without tenants
+     * 3. Otherwise, extract tenants from JWT
+     * 4. Read X-Tenant-Id header from request
+     * 5. Validate header value is in JWT's tenant list
+     * 6. Find or create tenant in RiTrack
+     * 7. Set TenantContext with selected tenant
      */
-    private void authenticateUser(String jwt, HttpServletRequest request) {
+    private void authenticateUser(String jwt, HttpServletRequest request, HttpServletResponse response) throws IOException {
         try {
-            // 1. Extract tenants from JWT
+            // 1. Check for global role (SUPER_ADMIN)
+            String globalRole = jwtUtil.extractGlobalRole(jwt);
+
+            if ("SUPER_ADMIN".equals(globalRole)) {
+                setupSuperAdminContext(jwt, request);
+                return;
+            }
+
+            // 2. Extract tenants from JWT (for normal users)
             List<JwtTenantInfo> jwtTenants = jwtUtil.extractTenants(jwt);
 
             if (jwtTenants.isEmpty()) {
-                log.warn("No RiTrack tenants found in JWT");
+                log.warn("No RiTrack tenants found in JWT and user is not SUPER_ADMIN");
                 return;
             }
 
             // 2. Read X-Tenant-Id header
             String tenantIdHeader = request.getHeader("X-Tenant-Id");
 
+            log.info("🔍 [JwtAuthenticationFilter] X-Tenant-Id header: '{}', Available JWT tenants: {}",
+                    tenantIdHeader,
+                    jwtTenants.stream()
+                            .map(t -> "ID=" + t.getTenantId() + " name=" + t.getTenantName())
+                            .collect(Collectors.toList()));
+
             if (tenantIdHeader == null || tenantIdHeader.trim().isEmpty()) {
-                log.debug("No X-Tenant-Id header found - using first tenant from JWT");
+                log.warn("⚠️ [JwtAuthenticationFilter] NO X-Tenant-Id header found - using FIRST tenant from JWT");
                 // Use first tenant by default
                 JwtTenantInfo firstTenant = jwtTenants.get(0);
+                log.warn("⚠️ [JwtAuthenticationFilter] Using DEFAULT tenant: ID={}, name={}",
+                        firstTenant.getTenantId(), firstTenant.getTenantName());
                 setupTenantContext(firstTenant, jwt, request);
                 return;
             }
@@ -140,6 +158,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 log.error("User attempted to access tenant {} which is not in their JWT. Available tenants: {}",
                         requestedTenantId,
                         jwtTenants.stream().map(JwtTenantInfo::getTenantId).collect(Collectors.toList()));
+
+                // ✅ NUEVO: Enviar respuesta HTTP 403 explícita
+                response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                response.setContentType("application/json");
+                response.getWriter().write("{\"error\":\"No tienes acceso a este tenant\",\"code\":\"TENANT_ACCESS_DENIED\"}");
                 return;
             }
 
@@ -149,6 +172,30 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         } catch (Exception e) {
             log.error("Error during authentication", e);
         }
+    }
+
+    /**
+     * Setup authentication for SUPER_ADMIN (no tenant context needed)
+     */
+    private void setupSuperAdminContext(String jwt, HttpServletRequest request) {
+        // Extract user info from JWT
+        Long userId = jwtUtil.getUserIdFromToken(jwt);
+        String email = jwtUtil.getEmailFromToken(jwt);
+
+        // Set Spring Security authentication with SUPER_ADMIN role
+        List<SimpleGrantedAuthority> authorities = Collections.singletonList(
+                new SimpleGrantedAuthority("ROLE_SUPER_ADMIN")
+        );
+
+        UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+                email,
+                null,
+                authorities
+        );
+        authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+
+        log.debug("SUPER_ADMIN {} authenticated without tenant context", email);
     }
 
     /**
@@ -164,16 +211,36 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         // Extract user info from JWT
         Long userId = jwtUtil.getUserIdFromToken(jwt);
         String email = jwtUtil.getEmailFromToken(jwt);
+        List<JwtTenantInfo> allJwtTenants = jwtUtil.extractTenants(jwt);
 
-        // Create TenantContext
+        // Map ALL tenants from JWT to RiTrack tenants (for multi-tenant support)
+        List<Long> allTenantIds = new ArrayList<>();
+        List<String> allTenantNames = new ArrayList<>();
+        List<String> allSchemaNames = new ArrayList<>();
+
+        for (JwtTenantInfo jwtT : allJwtTenants) {
+            TenantEntity t = tenantService.findOrCreateByHargosTenantId(
+                    jwtT.getTenantId(),
+                    jwtT.getTenantName()
+            );
+            allTenantIds.add(t.getId());
+            allTenantNames.add(t.getName());
+            allSchemaNames.add(t.getSchemaName());
+        }
+
+        // Create TenantContext with ALL tenants + selectedTenantId
         TenantContext.TenantInfo contextInfo = TenantContext.TenantInfo.builder()
                 .userId(userId)
                 .email(email)
-                .tenantIds(Collections.singletonList(tenant.getId()))  // Internal RiTrack ID
-                .tenantNames(Collections.singletonList(tenant.getName()))
-                .schemaNames(Collections.singletonList(tenant.getSchemaName()))
+                .tenantIds(allTenantIds)  // ALL tenant IDs
+                .tenantNames(allTenantNames)
+                .schemaNames(allSchemaNames)
+                .selectedTenantId(tenant.getId())  // ⭐ SELECTED tenant ID for this request
                 .roles(Collections.singletonList(jwtTenant.getRole()))
                 .build();
+
+        log.info("🎯 [JwtAuthenticationFilter] Setting TenantContext - selectedTenantId: {}, selectedSchema: {}, allTenantIds: {}, allSchemas: {}",
+                tenant.getId(), tenant.getSchemaName(), allTenantIds, allSchemaNames);
 
         TenantContext.setCurrentContext(contextInfo);
 

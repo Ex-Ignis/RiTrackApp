@@ -52,6 +52,7 @@ public class RiderLocationService {
     private final TenantRepository tenantRepository;
     private final TenantSettingsService tenantSettingsService;
     private final TenantOnboardingService onboardingService;
+    private final AutoBlockService autoBlockService;
 
     @Value("${debug.mock-data.enabled:false}")
     private boolean mockDataEnabled;
@@ -61,12 +62,14 @@ public class RiderLocationService {
                                  RiderLocationWebSocketHandler webSocketHandler,
                                  TenantRepository tenantRepository,
                                  TenantSettingsService tenantSettingsService,
-                                 TenantOnboardingService onboardingService) {
+                                 TenantOnboardingService onboardingService,
+                                 AutoBlockService autoBlockService) {
         this.glovoClient = glovoClient;
         this.webSocketHandler = webSocketHandler;
         this.tenantRepository = tenantRepository;
         this.tenantSettingsService = tenantSettingsService;
         this.onboardingService = onboardingService;
+        this.autoBlockService = autoBlockService;
     }
 
     // ===============================================
@@ -149,10 +152,14 @@ public class RiderLocationService {
             for (Integer cityId : activeCityIds) {
                 try {
                     List<RiderLocationDto> locations = getRiderLocationsByCity(tenantId, cityId);
-
                     if (!locations.isEmpty()) {
-                        // Broadcast via WebSocket
-                        webSocketHandler.broadcastRiderLocationsByCity(cityId, locations);
+                        // Broadcast via WebSocket (MULTI-TENANT: Filtra por tenant automáticamente)
+                        webSocketHandler.broadcastRiderLocationsByCity(tenantId, cityId, locations);
+                        logger.debug("Tenant {}, Ciudad {}: Enviadas {} ubicaciones",
+                            tenantName, cityId, locations.size());
+
+                        // Procesar auto-bloqueo por saldo de cash
+                        autoBlockService.processAutoBlockForCity(tenantId, cityId, locations);
                     }
 
                 } catch (Exception e) {
@@ -171,8 +178,15 @@ public class RiderLocationService {
     // MÉTODOS PÚBLICOS - UBICACIONES POR CIUDAD
     // ===============================================
 
+    // Límite de seguridad: 4 req/s (deja margen de 1 req/s del límite de 5 req/s de Glovo Live API)
+    private static final int SAFE_REQ_PER_SECOND = 4;
+    private static final long THROTTLE_DELAY_MS = 1000 / SAFE_REQ_PER_SECOND; // 250ms
+
     /**
      * Obtiene ubicaciones actuales de riders para una ciudad específica de un tenant.
+     *
+     * THROTTLING: Respeta límite de 4 req/s (margen de seguridad del límite de 5 req/s de Glovo).
+     * Aplica delay de 250ms entre páginas para garantizar que no se exceda el rate limit.
      *
      * @param tenantId Tenant ID
      * @param cityId ID de la ciudad
@@ -189,11 +203,14 @@ public class RiderLocationService {
             final int MAX_PAGES = 50; // Límite de seguridad
 
             while (hasMorePages && page < MAX_PAGES) {
+                long startTime = System.currentTimeMillis();
+
                 // Llamada a GlovoClient con tenantId
-                Object ridersData = glovoClient.obtenerRidersPorCiudad(
+                Object ridersData = glovoClient.getRidersByCity(
                     tenantId, cityId, page, PAGE_SIZE, "employee_id"
                 );
 
+                logger.debug("Tenant {}, Ciudad {}, Página {}: ridersData = {}", tenantId, cityId, page, ridersData);
                 if (ridersData == null) {
                     break;
                 }
@@ -214,6 +231,24 @@ public class RiderLocationService {
                         hasMorePages = false;
                     }
                     page++;
+
+                    // THROTTLING: Esperar entre páginas para respetar límite de 4 req/s
+                    if (hasMorePages && page < MAX_PAGES) {
+                        long elapsed = System.currentTimeMillis() - startTime;
+                        long sleepTime = THROTTLE_DELAY_MS - elapsed;
+
+                        if (sleepTime > 0) {
+                            try {
+                                logger.debug("Tenant {}, Ciudad {}: Throttling {}ms antes de página {}",
+                                    tenantId, cityId, sleepTime, page);
+                                Thread.sleep(sleepTime);
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                logger.warn("Tenant {}, Ciudad {}: Throttling interrumpido", tenantId, cityId);
+                                hasMorePages = false;
+                            }
+                        }
+                    }
                 } else {
                     hasMorePages = false;
                 }
@@ -224,7 +259,7 @@ public class RiderLocationService {
                     tenantId, cityId, MAX_PAGES);
             }
 
-            logger.debug("Tenant {}, Ciudad {}: Total {} riders en {} páginas",
+            logger.debug("Tenant {}, Ciudad {}: Total {} riders en {} paginas",
                 tenantId, cityId, allLocations.size(), page);
 
             return allLocations;
@@ -287,6 +322,7 @@ public class RiderLocationService {
      */
     private List<RiderLocationDto> extractLocationsFromRidersData(Object ridersData) {
         if (!(ridersData instanceof Map)) {
+            logger.info("❌ ridersData no es Map");
             return new ArrayList<>();
         }
 
@@ -296,15 +332,31 @@ public class RiderLocationService {
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> ridersList = (List<Map<String, Object>>) responseMap.get("content");
 
+        logger.debug("Riders desde API (content): {}", ridersList != null ? ridersList.size() : "null");
+
         if (ridersList == null || ridersList.isEmpty()) {
             return new ArrayList<>();
         }
 
-        return ridersList.stream()
+        List<RiderLocationDto> converted = ridersList.stream()
             .map(this::convertToRiderLocationDto)
             .filter(Objects::nonNull)
-            .filter(this::hasValidCoordinates)
             .collect(Collectors.toList());
+
+        logger.debug("✅ Procesados {} riders (incluyendo riders sin coordenadas)", converted.size());
+
+        // Contar riders con y sin coordenadas para logging
+        long withCoordinates = converted.stream()
+            .filter(this::hasValidCoordinates)
+            .count();
+        long withoutCoordinates = converted.size() - withCoordinates;
+
+        if (withoutCoordinates > 0) {
+            logger.debug("📊 Estadísticas: {} con coordenadas, {} sin coordenadas",
+                withCoordinates, withoutCoordinates);
+        }
+
+        return converted; // ✅ Retornar TODOS los riders, incluso sin coordenadas
     }
 
     /**
@@ -340,8 +392,23 @@ public class RiderLocationService {
                 dto.setVehicleTypeName((String) vehicleType.get("name"));
             }
 
-            // Delivery data
-            dto.setHasActiveDelivery((Boolean) riderMap.get("has_active_delivery"));
+            // Delivery data - CORREGIDO: La API v1 usa deliveries_info.has_active_deliveries
+            @SuppressWarnings("unchecked")
+            Map<String, Object> deliveriesInfo = (Map<String, Object>) riderMap.get("deliveries_info");
+            if (deliveriesInfo != null) {
+                Boolean hasActiveDeliveries = (Boolean) deliveriesInfo.get("has_active_deliveries");
+                dto.setHasActiveDelivery(hasActiveDeliveries != null && hasActiveDeliveries);
+            } else {
+                dto.setHasActiveDelivery(false);
+            }
+
+            // Wallet info - Para sistema de auto-bloqueo
+            @SuppressWarnings("unchecked")
+            Map<String, Object> walletInfo = (Map<String, Object>) riderMap.get("wallet_info");
+            if (walletInfo != null) {
+                dto.setWalletBalance(getDoubleValue(walletInfo, "balance"));
+                dto.setWalletLimitStatus((String) walletInfo.get("limit_status"));
+            }
 
             return dto;
 
@@ -408,7 +475,8 @@ public class RiderLocationService {
 
             for (Integer cityId : activeCityIds) {
                 List<RiderLocationDto> mockLocations = generateMockLocations(tenantId, cityId);
-                webSocketHandler.broadcastRiderLocationsByCity(cityId, mockLocations);
+                webSocketHandler.broadcastRiderLocationsByCity(tenantId, cityId, mockLocations);
+                logger.info("Tenant {}: Enviadas {} ubicaciones mock para ciudad {}", tenantId, mockLocations.size(), cityId);
             }
 
         } catch (Exception e) {

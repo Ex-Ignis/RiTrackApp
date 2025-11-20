@@ -63,14 +63,22 @@ public class RiderFilterController {
             @RequestParam(defaultValue = "0") Integer page,
             @RequestParam(defaultValue = "10") Integer size) {
 
-        // Extraer tenantId del contexto
+        // Extraer tenantId y userId del contexto
         TenantContext.TenantInfo tenantInfo = TenantContext.getCurrentContext();
-        Long tenantId = tenantInfo != null ? tenantInfo.getFirstTenantId() : null;
+        Long tenantId = tenantInfo != null ? (tenantInfo.getSelectedTenantId() != null ? tenantInfo.getSelectedTenantId() : tenantInfo.getFirstTenantId()) : null;
+        Long userId = tenantInfo != null ? tenantInfo.getUserId() : null;
 
         if (tenantId == null) {
             Map<String, String> error = new HashMap<>();
             error.put("error", "Tenant no encontrado");
             error.put("message", "No se pudo determinar el tenant del usuario");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
+        }
+
+        if (userId == null) {
+            Map<String, String> error = new HashMap<>();
+            error.put("error", "Usuario no autenticado");
+            error.put("message", "No se pudo determinar el ID del usuario");
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
         }
 
@@ -90,9 +98,9 @@ public class RiderFilterController {
                     .size(size)
                     .build();
 
-            logger.info("Tenant {}: Búsqueda de riders: {}", tenantId, filters);
+            logger.info("Tenant {}, User {}: Búsqueda de riders: {}", tenantId, userId, filters);
 
-            PaginatedResponseDto<RiderSummaryDto> result = riderFilterService.searchRiders(tenantId, filters);
+            PaginatedResponseDto<RiderSummaryDto> result = riderFilterService.searchRiders(tenantId, userId, filters);
             return ResponseEntity.ok(result);
 
         } catch (Exception e) {
@@ -108,9 +116,10 @@ public class RiderFilterController {
     public ResponseEntity<?> searchRidersPost(
             @RequestBody RiderFilterDto filters) {
 
-        // Extraer tenantId del contexto
+        // Extraer tenantId y userId del contexto
         TenantContext.TenantInfo tenantInfo = TenantContext.getCurrentContext();
-        Long tenantId = tenantInfo != null ? tenantInfo.getFirstTenantId() : null;
+        Long tenantId = tenantInfo != null ? (tenantInfo.getSelectedTenantId() != null ? tenantInfo.getSelectedTenantId() : tenantInfo.getFirstTenantId()) : null;
+        Long userId = tenantInfo != null ? tenantInfo.getUserId() : null;
 
         if (tenantId == null) {
             Map<String, String> error = new HashMap<>();
@@ -119,10 +128,17 @@ public class RiderFilterController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
         }
 
-        try {
-            logger.info("Tenant {}: Búsqueda de riders (POST): {}", tenantId, filters);
+        if (userId == null) {
+            Map<String, String> error = new HashMap<>();
+            error.put("error", "Usuario no autenticado");
+            error.put("message", "No se pudo determinar el ID del usuario");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
+        }
 
-            PaginatedResponseDto<RiderSummaryDto> result = riderFilterService.searchRiders(tenantId, filters);
+        try {
+            logger.info("Tenant {}, User {}: Búsqueda de riders (POST): {}", tenantId, userId, filters);
+
+            PaginatedResponseDto<RiderSummaryDto> result = riderFilterService.searchRiders(tenantId, userId, filters);
             return ResponseEntity.ok(result);
 
         } catch (Exception e) {
