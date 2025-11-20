@@ -253,6 +253,70 @@ BEGIN
     EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_rider_block_status_last_balance_check ON %I.rider_block_status(last_balance_check DESC)',
         tenant_schema_name, tenant_schema_name);
 
+    -- Create auto_block_city_config table (per-city auto-block configuration)
+    EXECUTE format('
+        CREATE TABLE IF NOT EXISTS %I.auto_block_city_config (
+            id BIGSERIAL PRIMARY KEY,
+            city_id INTEGER NOT NULL UNIQUE,
+            enabled BOOLEAN NOT NULL DEFAULT false,
+            cash_limit NUMERIC(10, 2) NOT NULL DEFAULT 150.00,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+            CHECK (cash_limit > 0),
+            CHECK (city_id > 0)
+        )
+    ', tenant_schema_name);
+
+    -- Create indexes for auto_block_city_config
+    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_auto_block_city_config_city_id ON %I.auto_block_city_config(city_id)',
+        tenant_schema_name, tenant_schema_name);
+    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_auto_block_city_config_enabled ON %I.auto_block_city_config(enabled) WHERE enabled = true',
+        tenant_schema_name, tenant_schema_name);
+
+    -- Create user_city_assignments table (city access control per user)
+    EXECUTE format('
+        CREATE TABLE IF NOT EXISTS %I.user_city_assignments (
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL,
+            city_id BIGINT NOT NULL,
+            assigned_by_user_id BIGINT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+            UNIQUE(user_id, city_id),
+            CHECK (user_id > 0)
+        )
+    ', tenant_schema_name);
+
+    -- Create indexes for user_city_assignments
+    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_user_city_user ON %I.user_city_assignments(user_id)',
+        tenant_schema_name, tenant_schema_name);
+    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_user_city_city ON %I.user_city_assignments(city_id)',
+        tenant_schema_name, tenant_schema_name);
+
+    -- Create rider_limit_warnings table (warnings when tenant exceeds rider limit)
+    EXECUTE format('
+        CREATE TABLE IF NOT EXISTS %I.rider_limit_warnings (
+            id BIGSERIAL PRIMARY KEY,
+            current_count INTEGER NOT NULL,
+            allowed_limit INTEGER NOT NULL,
+            excess_count INTEGER NOT NULL,
+            is_resolved BOOLEAN NOT NULL DEFAULT false,
+            resolved_at TIMESTAMP,
+            resolved_by TEXT,
+            resolution_note TEXT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            expires_at TIMESTAMP
+        )
+    ', tenant_schema_name);
+
+    -- Create indexes for rider_limit_warnings
+    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_rider_limit_warnings_resolved ON %I.rider_limit_warnings(is_resolved, created_at DESC)',
+        tenant_schema_name, tenant_schema_name);
+    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_rider_limit_warnings_created ON %I.rider_limit_warnings(created_at DESC)',
+        tenant_schema_name, tenant_schema_name);
+
     -- Grant permissions
     EXECUTE format('GRANT ALL PRIVILEGES ON SCHEMA %I TO ritrack', tenant_schema_name);
     EXECUTE format('GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA %I TO ritrack', tenant_schema_name);

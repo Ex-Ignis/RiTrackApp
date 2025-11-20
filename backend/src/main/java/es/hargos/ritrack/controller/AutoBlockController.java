@@ -2,6 +2,7 @@ package es.hargos.ritrack.controller;
 
 import es.hargos.ritrack.context.TenantContext;
 import es.hargos.ritrack.dto.AutoBlockConfigDto;
+import es.hargos.ritrack.dto.AutoBlockCityConfigDto;
 import es.hargos.ritrack.dto.RiderBlockStatusDto;
 import es.hargos.ritrack.entity.RiderBlockStatusEntity;
 import es.hargos.ritrack.service.AutoBlockService;
@@ -207,6 +208,176 @@ public class AutoBlockController {
                     tenantId, employeeId, e.getMessage(), e);
             Map<String, String> error = new HashMap<>();
             error.put("error", "Error obteniendo estado de rider");
+            error.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
+    }
+
+    /**
+     * Obtiene todas las configuraciones de auto-bloqueo por ciudad.
+     *
+     * GET /api/v1/auto-block/config/cities
+     */
+    @GetMapping("/config/cities")
+    public ResponseEntity<?> getAllCityConfigs() {
+        TenantContext.TenantInfo tenantInfo = TenantContext.getCurrentContext();
+        Long tenantId = tenantInfo != null ? (tenantInfo.getSelectedTenantId() != null ? tenantInfo.getSelectedTenantId() : tenantInfo.getFirstTenantId()) : null;
+
+        if (tenantId == null) {
+            Map<String, String> error = new HashMap<>();
+            error.put("error", "Tenant no encontrado");
+            error.put("message", "No se pudo determinar el tenant del usuario");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
+        }
+
+        try {
+            List<AutoBlockCityConfigDto> configs = autoBlockService.getAllCityConfigs(tenantId);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("count", configs.size());
+            response.put("configs", configs);
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            logger.error("Tenant {}: Error obteniendo configuraciones por ciudad: {}",
+                    tenantId, e.getMessage(), e);
+            Map<String, String> error = new HashMap<>();
+            error.put("error", "Error obteniendo configuraciones");
+            error.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
+    }
+
+    /**
+     * Obtiene la configuración de auto-bloqueo de una ciudad específica.
+     *
+     * GET /api/v1/auto-block/config/city/{cityId}
+     */
+    @GetMapping("/config/city/{cityId}")
+    public ResponseEntity<?> getCityConfig(@PathVariable Integer cityId) {
+        TenantContext.TenantInfo tenantInfo = TenantContext.getCurrentContext();
+        Long tenantId = tenantInfo != null ? (tenantInfo.getSelectedTenantId() != null ? tenantInfo.getSelectedTenantId() : tenantInfo.getFirstTenantId()) : null;
+
+        if (tenantId == null) {
+            Map<String, String> error = new HashMap<>();
+            error.put("error", "Tenant no encontrado");
+            error.put("message", "No se pudo determinar el tenant del usuario");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
+        }
+
+        try {
+            AutoBlockCityConfigDto config = autoBlockService.getAutoBlockConfigForCity(tenantId, cityId);
+
+            if (config == null) {
+                Map<String, Object> response = new HashMap<>();
+                response.put("cityId", cityId);
+                response.put("message", "No existe configuración para esta ciudad");
+                response.put("enabled", false);
+                response.put("cashLimit", 150.00);
+                return ResponseEntity.ok(response);
+            }
+
+            return ResponseEntity.ok(config);
+
+        } catch (Exception e) {
+            logger.error("Tenant {}, Ciudad {}: Error obteniendo configuración: {}",
+                    tenantId, cityId, e.getMessage(), e);
+            Map<String, String> error = new HashMap<>();
+            error.put("error", "Error obteniendo configuración");
+            error.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
+    }
+
+    /**
+     * Actualiza o crea la configuración de auto-bloqueo para una ciudad.
+     *
+     * PUT /api/v1/auto-block/config/city/{cityId}
+     *
+     * Body:
+     * {
+     *   "enabled": true,
+     *   "cashLimit": 150.00
+     * }
+     */
+    @PutMapping("/config/city/{cityId}")
+    public ResponseEntity<?> updateCityConfig(@PathVariable Integer cityId, @RequestBody AutoBlockCityConfigDto request) {
+        TenantContext.TenantInfo tenantInfo = TenantContext.getCurrentContext();
+        Long tenantId = tenantInfo != null ? (tenantInfo.getSelectedTenantId() != null ? tenantInfo.getSelectedTenantId() : tenantInfo.getFirstTenantId()) : null;
+
+        if (tenantId == null) {
+            Map<String, String> error = new HashMap<>();
+            error.put("error", "Tenant no encontrado");
+            error.put("message", "No se pudo determinar el tenant del usuario");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
+        }
+
+        try {
+            // Validaciones
+            if (request.getEnabled() == null || request.getCashLimit() == null) {
+                Map<String, String> error = new HashMap<>();
+                error.put("error", "Campos requeridos faltantes");
+                error.put("message", "enabled y cashLimit son requeridos");
+                return ResponseEntity.badRequest().body(error);
+            }
+
+            if (request.getCashLimit().doubleValue() <= 0) {
+                Map<String, String> error = new HashMap<>();
+                error.put("error", "Límite inválido");
+                error.put("message", "cashLimit debe ser mayor a 0");
+                return ResponseEntity.badRequest().body(error);
+            }
+
+            AutoBlockCityConfigDto updatedConfig = autoBlockService.saveAutoBlockConfigForCity(tenantId, cityId, request);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("message", "Configuración actualizada correctamente");
+            response.put("config", updatedConfig);
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            logger.error("Tenant {}, Ciudad {}: Error actualizando configuración: {}",
+                    tenantId, cityId, e.getMessage(), e);
+            Map<String, String> error = new HashMap<>();
+            error.put("error", "Error actualizando configuración");
+            error.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
+    }
+
+    /**
+     * Elimina la configuración de auto-bloqueo de una ciudad.
+     *
+     * DELETE /api/v1/auto-block/config/city/{cityId}
+     */
+    @DeleteMapping("/config/city/{cityId}")
+    public ResponseEntity<?> deleteCityConfig(@PathVariable Integer cityId) {
+        TenantContext.TenantInfo tenantInfo = TenantContext.getCurrentContext();
+        Long tenantId = tenantInfo != null ? (tenantInfo.getSelectedTenantId() != null ? tenantInfo.getSelectedTenantId() : tenantInfo.getFirstTenantId()) : null;
+
+        if (tenantId == null) {
+            Map<String, String> error = new HashMap<>();
+            error.put("error", "Tenant no encontrado");
+            error.put("message", "No se pudo determinar el tenant del usuario");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
+        }
+
+        try {
+            autoBlockService.deleteAutoBlockConfigForCity(tenantId, cityId);
+
+            Map<String, String> response = new HashMap<>();
+            response.put("message", "Configuración eliminada correctamente");
+            response.put("cityId", cityId.toString());
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            logger.error("Tenant {}, Ciudad {}: Error eliminando configuración: {}",
+                    tenantId, cityId, e.getMessage(), e);
+            Map<String, String> error = new HashMap<>();
+            error.put("error", "Error eliminando configuración");
             error.put("message", e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
         }

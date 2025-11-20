@@ -54,6 +54,7 @@ public class RiderFilterService {
     private final GlovoClient glovoClient;
     private final RoosterCacheService roosterCache;
     private final TenantSettingsService tenantSettingsService;
+    private final UserCityService userCityService;
 
     // Caché temporal para Live API
     private final Map<String, CachedLiveData> liveCache = new ConcurrentHashMap<>();
@@ -68,6 +69,7 @@ public class RiderFilterService {
             GlovoClient glovoClient,
             RoosterCacheService roosterCache,
             TenantSettingsService tenantSettingsService,
+            UserCityService userCityService,
             @Value("${cache.live.city.ttl-seconds:30}") long liveTtlSeconds,
             @Value("${api.search-timeout-seconds:15}") long searchTimeoutSeconds,
             @Value("${api.city-timeout-seconds:3}") long cityTimeoutSeconds) {
@@ -75,6 +77,7 @@ public class RiderFilterService {
         this.glovoClient = glovoClient;
         this.roosterCache = roosterCache;
         this.tenantSettingsService = tenantSettingsService;
+        this.userCityService = userCityService;
         this.LIVE_CACHE_TTL = liveTtlSeconds * 1000;
         this.SEARCH_TIMEOUT_SECONDS = searchTimeoutSeconds;
         this.CITY_TIMEOUT_SECONDS = cityTimeoutSeconds;
@@ -85,8 +88,9 @@ public class RiderFilterService {
 
     /**
      * Método principal de búsqueda con control de concurrencia
+     * Aplicar filtro automático de ciudades si el usuario tiene asignaciones
      */
-    public PaginatedResponseDto<RiderSummaryDto> searchRiders(Long tenantId, RiderFilterDto filters) {
+    public PaginatedResponseDto<RiderSummaryDto> searchRiders(Long tenantId, Long userId, RiderFilterDto filters) {
         int currentActive = activeSearches.incrementAndGet();
         long startTime = System.currentTimeMillis();
 
@@ -95,8 +99,29 @@ public class RiderFilterService {
             logger.warn("⚠️ Alta concurrencia: {} búsquedas activas", currentActive);
         }
 
-        logger.info("🔍 Tenant {} [Usuario {}] Iniciando búsqueda - Filtros: {}",
+        // NUEVO: Aplicar filtro automático de ciudades por usuario
+        List<Long> userCityIds = userCityService.getUserCityIds(userId);
+        if (userCityIds != null && !userCityIds.isEmpty()) {
+            logger.info("🔒 Usuario ID {} tiene {} ciudades asignadas - Aplicando filtro automático: {}",
+                    userId, userCityIds.size(), userCityIds);
+
+            // Si el usuario ya tiene un filtro de ciudad específico, verificar que esté en sus ciudades asignadas
+            if (filters.getCityId() != null) {
+                if (!userCityIds.contains(filters.getCityId().longValue())) {
+                    logger.warn("⚠️ Usuario ID {} intentó filtrar por ciudad {} que no tiene asignada. Aplicando restricción.",
+                            userId, filters.getCityId());
+                    // El usuario no puede ver esa ciudad, forzar a sus ciudades asignadas
+                    filters.setCityId(null);
+                }
+            }
+            // Nota: El filtro de ciudades se aplica más abajo en getLiveRiders() y getRoosterRiders()
+        } else {
+            logger.debug("Usuario ID {} no tiene restricciones de ciudades - Puede ver todas", userId);
+        }
+
+        logger.info("🔍 Tenant {}, User {} [Thread {}] Iniciando búsqueda - Filtros: {}",
                 tenantId,
+                userId,
                 Thread.currentThread().getId(),
                 filters.hasFilters() ? filters.getFilterDescription() : "SIN FILTROS");
 
@@ -108,12 +133,13 @@ public class RiderFilterService {
             }
 
             // Ejecutar Live y Rooster EN PARALELO con timeout
+            // NUEVO: Pasar userCityIds para aplicar filtro de ciudades
             CompletableFuture<List<RiderSummaryDto>> liveFuture = CompletableFuture
-                    .supplyAsync(() -> getLiveRiders(tenantId, filters), SHARED_EXECUTOR)
+                    .supplyAsync(() -> getLiveRiders(tenantId, filters, userCityIds), SHARED_EXECUTOR)
                     .orTimeout(SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             CompletableFuture<List<RiderSummaryDto>> roosterFuture = CompletableFuture
-                    .supplyAsync(() -> getRoosterRiders(tenantId, filters), SHARED_EXECUTOR)
+                    .supplyAsync(() -> getRoosterRiders(tenantId, filters, userCityIds), SHARED_EXECUTOR)
                     .orTimeout(SEARCH_TIMEOUT_SECONDS - 2, TimeUnit.SECONDS);
 
             // Esperar ambos resultados
@@ -172,15 +198,24 @@ public class RiderFilterService {
 
     /**
      * Obtiene riders de Live API con caché y control de concurrencia
+     * NUEVO: Aplica filtro de ciudades del usuario si están asignadas
      */
-    private List<RiderSummaryDto> getLiveRiders(Long tenantId, RiderFilterDto filters) {
+    private List<RiderSummaryDto> getLiveRiders(Long tenantId, RiderFilterDto filters, List<Long> userCityIds) {
         long startTime = System.currentTimeMillis();
         List<RiderSummaryDto> results = Collections.synchronizedList(new ArrayList<>());
 
         try {
             List<Integer> cityIds;
 
-            if (filters.getCityId() != null) {
+            // NUEVO: Aplicar filtro de ciudades del usuario
+            if (userCityIds != null && !userCityIds.isEmpty()) {
+                // Usuario tiene restricción de ciudades
+                cityIds = userCityIds.stream()
+                        .map(Long::intValue)
+                        .collect(Collectors.toList());
+                logger.debug("Filtrando Live API por ciudades del usuario: {}", cityIds);
+            } else if (filters.getCityId() != null) {
+                // Usuario sin restricción + filtro manual de ciudad
                 cityIds = List.of(filters.getCityId());
             } else {
                 // Intentar usar caché completo
@@ -390,8 +425,9 @@ public class RiderFilterService {
 
     /**
      * Obtiene riders de Rooster desde caché
+     * NUEVO: Aplica filtro de ciudades del usuario si están asignadas
      */
-    private List<RiderSummaryDto> getRoosterRiders(Long tenantId, RiderFilterDto filters) {
+    private List<RiderSummaryDto> getRoosterRiders(Long tenantId, RiderFilterDto filters, List<Long> userCityIds) {
         long startTime = System.currentTimeMillis();
         List<RiderSummaryDto> results = new ArrayList<>();
 
@@ -401,6 +437,16 @@ public class RiderFilterService {
             if (allEmployees == null || allEmployees.isEmpty()) {
                 return results;
             }
+
+            // NUEVO: Convertir userCityIds a Integer para comparación
+            List<Integer> userCityIdsInt = null;
+            if (userCityIds != null && !userCityIds.isEmpty()) {
+                userCityIdsInt = userCityIds.stream()
+                        .map(Long::intValue)
+                        .collect(Collectors.toList());
+                logger.debug("Filtrando Rooster por ciudades del usuario: {}", userCityIdsInt);
+            }
+            final List<Integer> finalUserCityIds = userCityIdsInt;
 
             // Usar parallel stream con límite de threads
             ForkJoinPool customThreadPool = new ForkJoinPool(10);
@@ -420,6 +466,13 @@ public class RiderFilterService {
                                 })
                                 .filter(Objects::nonNull)
                                 .filter(rider -> matchesRoosterFilters(rider, filters))
+                                .filter(rider -> {
+                                    // NUEVO: Aplicar filtro de ciudades del usuario
+                                    if (finalUserCityIds != null && !finalUserCityIds.isEmpty()) {
+                                        return rider.getCityId() != null && finalUserCityIds.contains(rider.getCityId());
+                                    }
+                                    return true; // Sin restricción de ciudades
+                                })
                                 .collect(Collectors.toList())
                 ).get(5, TimeUnit.SECONDS);
             } finally {

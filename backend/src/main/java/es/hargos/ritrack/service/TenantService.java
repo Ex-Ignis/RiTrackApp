@@ -171,21 +171,36 @@ public class TenantService {
      */
     @Transactional
     public TenantEntity findOrCreateByHargosTenantId(Long hargosTenantId, String tenantName) {
-        return tenantRepository.findByHargosTenantId(hargosTenantId)
-                .orElseGet(() -> {
-                    log.info("🆕 Auto-creating tenant '{}' (HargosAuth ID: {})", tenantName, hargosTenantId);
+        // First, try to find by HargosAuth tenant ID
+        Optional<TenantEntity> existingById = tenantRepository.findByHargosTenantId(hargosTenantId);
+        if (existingById.isPresent()) {
+            return existingById.get();
+        }
 
-                    String schemaName = generateSchemaName(tenantName);
+        // If not found by ID, check if a tenant with this name already exists
+        Optional<TenantEntity> existingByName = tenantRepository.findByName(tenantName);
+        if (existingByName.isPresent()) {
+            // Update the existing tenant's HargosAuth ID (data sync from HargosAuth)
+            TenantEntity tenant = existingByName.get();
+            log.info("🔄 Updating HargosAuth ID for tenant '{}': {} -> {}",
+                     tenantName, tenant.getHargosTenantId(), hargosTenantId);
+            tenant.setHargosTenantId(hargosTenantId);
+            return tenantRepository.save(tenant);
+        }
 
-                    TenantEntity tenant = TenantEntity.builder()
-                            .hargosTenantId(hargosTenantId)
-                            .name(tenantName)
-                            .schemaName(schemaName)
-                            .isActive(false)  // Needs onboarding
-                            .build();
+        // If not found by ID or name, create new tenant
+        log.info("🆕 Auto-creating tenant '{}' (HargosAuth ID: {})", tenantName, hargosTenantId);
 
-                    return tenantRepository.save(tenant);
-                });
+        String schemaName = generateSchemaName(tenantName);
+
+        TenantEntity tenant = TenantEntity.builder()
+                .hargosTenantId(hargosTenantId)
+                .name(tenantName)
+                .schemaName(schemaName)
+                .isActive(false)  // Needs onboarding
+                .build();
+
+        return tenantRepository.save(tenant);
     }
 
     /**

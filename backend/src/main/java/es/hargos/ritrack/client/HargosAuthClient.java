@@ -142,6 +142,48 @@ public class HargosAuthClient {
         }
     }
 
+    /**
+     * Get all users belonging to a tenant from HargosAuth.
+     *
+     * @param hargosTenantId Tenant ID in HargosAuth
+     * @return List of users in the tenant
+     * @throws RuntimeException if HargosAuth is unreachable
+     */
+    public java.util.List<TenantUserResponse> getTenantUsers(Long hargosTenantId) {
+        String url = hargosAuthBaseUrl + "/api/ritrack/tenant-users/" + hargosTenantId;
+
+        try {
+            logger.debug("Fetching tenant users from HargosAuth: tenantId={}", hargosTenantId);
+
+            ResponseEntity<TenantUserResponse[]> response = restTemplate.getForEntity(
+                url,
+                TenantUserResponse[].class
+            );
+
+            if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
+                logger.debug("Retrieved {} users for tenant {}", response.getBody().length, hargosTenantId);
+                return java.util.Arrays.asList(response.getBody());
+            }
+
+            throw new RuntimeException("Failed to get tenant users: unexpected response");
+
+        } catch (HttpClientErrorException e) {
+            if (e.getStatusCode() == HttpStatus.NOT_FOUND) {
+                logger.warn("Tenant users endpoint not found or tenant doesn't exist: tenantId={}", hargosTenantId);
+                // Return empty list instead of throwing - graceful degradation
+                return java.util.Collections.emptyList();
+            }
+            logger.error("Error calling HargosAuth /tenant-users: status={}, message={}",
+                e.getStatusCode(), e.getMessage());
+            // Return empty list instead of throwing
+            return java.util.Collections.emptyList();
+        } catch (Exception e) {
+            logger.error("Error communicating with HargosAuth for tenant users: {}", e.getMessage(), e);
+            // Return empty list instead of throwing - graceful degradation
+            return java.util.Collections.emptyList();
+        }
+    }
+
     // ==================== DTOs ====================
 
     /**
@@ -156,5 +198,18 @@ public class HargosAuthClient {
         private Integer accountLimit;
         private Integer riderLimit;  // NULL = unlimited
         private Boolean isActive;
+    }
+
+    /**
+     * Response from GET /api/ritrack/tenant-users/{tenantId}
+     * Represents a user in HargosAuth belonging to a tenant
+     */
+    @Data
+    public static class TenantUserResponse {
+        private Long id;           // User ID
+        private String email;      // User email
+        private String firstName;  // User first name (optional)
+        private String lastName;   // User last name (optional)
+        private String role;       // Role in this tenant (TENANT_ADMIN, USER, etc.)
     }
 }

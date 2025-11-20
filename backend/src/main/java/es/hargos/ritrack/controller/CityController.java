@@ -3,6 +3,7 @@ package es.hargos.ritrack.controller;
 import es.hargos.ritrack.context.TenantContext;
 import es.hargos.ritrack.dto.StartingPointDto;
 import es.hargos.ritrack.service.CityService;
+import es.hargos.ritrack.service.UserCityService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,6 +28,9 @@ public class CityController {
     @Autowired
     private CityService cityService;
 
+    @Autowired
+    private UserCityService userCityService;
+
     /**
      * Get starting points for a city
      *
@@ -42,6 +46,7 @@ public class CityController {
      *   {"id": 333, "name": "Bcn_3325", "cityId": 804}
      * ]
      *
+     * Security: Validates that the user has access to the requested city
      * Cache: 30 days TTL (starting points rarely change)
      * Multi-tenant: Uses TenantContext (ThreadLocal)
      */
@@ -49,9 +54,10 @@ public class CityController {
     public ResponseEntity<?> getStartingPoints(@PathVariable Integer cityId) {
         logger.info("Received request for starting points: cityId={}", cityId);
 
-        // Extract tenant from context
+        // Extract tenant and user from context
         TenantContext.TenantInfo tenantInfo = TenantContext.getCurrentContext();
         Long tenantId = tenantInfo != null ? (tenantInfo.getSelectedTenantId() != null ? tenantInfo.getSelectedTenantId() : tenantInfo.getFirstTenantId()) : null;
+        Long userId = tenantInfo != null ? tenantInfo.getUserId() : null;
 
         if (tenantId == null) {
             logger.warn("Tenant ID not found in context");
@@ -60,18 +66,47 @@ public class CityController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
         }
 
+        if (userId == null) {
+            logger.warn("User ID not found in context");
+            Map<String, Object> error = new HashMap<>();
+            error.put("error", "Usuario no autenticado");
+            error.put("message", "No se pudo determinar el ID del usuario");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
+        }
+
         try {
+            // Security check: Validate user has access to this city
+            List<Long> userCityIds = userCityService.getUserCityIds(userId);
+
+            // If user has city restrictions, validate access
+            if (userCityIds != null && !userCityIds.isEmpty()) {
+                if (!userCityIds.contains(cityId.longValue())) {
+                    logger.warn("🚫 Usuario ID {} intentó acceder a ciudad {} sin permiso. Ciudades permitidas: {}",
+                        userId, cityId, userCityIds);
+
+                    Map<String, Object> error = new HashMap<>();
+                    error.put("error", "Acceso denegado");
+                    error.put("message", "No tienes permiso para acceder a esta ciudad");
+                    error.put("cityId", cityId);
+                    return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error);
+                }
+
+                logger.debug("✅ Usuario ID {} tiene acceso a ciudad {}", userId, cityId);
+            } else {
+                logger.debug("Usuario ID {} no tiene restricciones de ciudad (puede ver todas)", userId);
+            }
+
             // Get starting points from Glovo API (cached 30 days)
             List<StartingPointDto> startingPoints = cityService.getStartingPoints(tenantId, cityId);
 
-            logger.info("Tenant {}: Returning {} starting points for city {}",
-                tenantId, startingPoints.size(), cityId);
+            logger.info("Tenant {}, User {}: Returning {} starting points for city {}",
+                tenantId, userId, startingPoints.size(), cityId);
 
             return ResponseEntity.ok(startingPoints);
 
         } catch (Exception e) {
-            logger.error("Tenant {}: Error fetching starting points for city {}: {}",
-                tenantId, cityId, e.getMessage(), e);
+            logger.error("Tenant {}, User {}: Error fetching starting points for city {}: {}",
+                tenantId, userId, cityId, e.getMessage(), e);
 
             Map<String, Object> error = new HashMap<>();
             error.put("error", "Error obteniendo starting points");

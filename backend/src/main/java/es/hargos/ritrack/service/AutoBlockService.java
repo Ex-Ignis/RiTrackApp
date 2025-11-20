@@ -1,8 +1,11 @@
 package es.hargos.ritrack.service;
 
 import es.hargos.ritrack.dto.AutoBlockConfigDto;
+import es.hargos.ritrack.dto.AutoBlockCityConfigDto;
 import es.hargos.ritrack.dto.RiderLocationDto;
+import es.hargos.ritrack.entity.AutoBlockCityConfigEntity;
 import es.hargos.ritrack.entity.RiderBlockStatusEntity;
+import es.hargos.ritrack.repository.AutoBlockCityConfigRepository;
 import es.hargos.ritrack.repository.RiderBlockStatusRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,6 +36,7 @@ public class AutoBlockService {
     private static final Logger logger = LoggerFactory.getLogger(AutoBlockService.class);
 
     private final RiderBlockStatusRepository blockStatusRepository;
+    private final AutoBlockCityConfigRepository cityConfigRepository;
     private final TenantSettingsService tenantSettingsService;
     private final es.hargos.ritrack.client.GlovoClient glovoClient;
     private final RiderDetailService riderDetailService;
@@ -41,12 +45,14 @@ public class AutoBlockService {
 
     @Autowired
     public AutoBlockService(RiderBlockStatusRepository blockStatusRepository,
+                             AutoBlockCityConfigRepository cityConfigRepository,
                              TenantSettingsService tenantSettingsService,
                              es.hargos.ritrack.client.GlovoClient glovoClient,
                              RiderDetailService riderDetailService,
                              CityService cityService,
                              RoosterCacheService roosterCache) {
         this.blockStatusRepository = blockStatusRepository;
+        this.cityConfigRepository = cityConfigRepository;
         this.tenantSettingsService = tenantSettingsService;
         this.glovoClient = glovoClient;
         this.riderDetailService = riderDetailService;
@@ -64,11 +70,11 @@ public class AutoBlockService {
      */
     public void processAutoBlockForCity(Long tenantId, Integer cityId, List<RiderLocationDto> riders) {
         try {
-            // 1. Verificar si auto-block está habilitado
-            AutoBlockConfigDto config = getAutoBlockConfig(tenantId);
+            // 1. Verificar si auto-block está habilitado para esta ciudad específica
+            AutoBlockCityConfigDto config = getAutoBlockConfigForCity(tenantId, cityId);
 
-            if (!config.getEnabled()) {
-                logger.debug("Tenant {}, Ciudad {}: Auto-bloqueo deshabilitado", tenantId, cityId);
+            if (config == null || !config.getEnabled()) {
+                logger.debug("Tenant {}, Ciudad {}: Auto-bloqueo deshabilitado o sin configuración", tenantId, cityId);
                 return;
             }
 
@@ -123,8 +129,10 @@ public class AutoBlockService {
     }
 
     /**
-     * Obtiene la configuración de auto-bloqueo del tenant.
+     * Obtiene la configuración de auto-bloqueo del tenant (LEGACY - config global).
+     * DEPRECATED: Usar getAutoBlockConfigForCity() en su lugar.
      */
+    @Deprecated
     public AutoBlockConfigDto getAutoBlockConfig(Long tenantId) {
         Boolean enabled = tenantSettingsService.getBooleanSetting(tenantId, "auto_block_enabled", false);
         BigDecimal cashLimit = tenantSettingsService.getBigDecimalSetting(tenantId, "auto_block_cash_limit",
@@ -143,8 +151,10 @@ public class AutoBlockService {
     }
 
     /**
-     * Actualiza la configuración de auto-bloqueo del tenant.
+     * Actualiza la configuración de auto-bloqueo del tenant (LEGACY - config global).
+     * DEPRECATED: Usar updateAutoBlockConfigForCity() en su lugar.
      */
+    @Deprecated
     @Transactional
     public AutoBlockConfigDto updateAutoBlockConfig(Long tenantId, AutoBlockConfigDto config) {
         tenantSettingsService.saveSetting(tenantId, "auto_block_enabled", config.getEnabled().toString());
@@ -157,9 +167,75 @@ public class AutoBlockService {
     }
 
     /**
+     * Obtiene la configuración de auto-bloqueo para una ciudad específica.
+     *
+     * @param tenantId Tenant ID
+     * @param cityId Ciudad ID
+     * @return DTO con configuración de la ciudad, o null si no existe
+     */
+    public AutoBlockCityConfigDto getAutoBlockConfigForCity(Long tenantId, Integer cityId) {
+        Optional<AutoBlockCityConfigEntity> configOpt = cityConfigRepository.findByCityId(cityId);
+        return configOpt.map(AutoBlockCityConfigDto::fromEntity).orElse(null);
+    }
+
+    /**
+     * Obtiene todas las configuraciones de auto-bloqueo por ciudad.
+     *
+     * @param tenantId Tenant ID
+     * @return Lista de configuraciones
+     */
+    public List<AutoBlockCityConfigDto> getAllCityConfigs(Long tenantId) {
+        return cityConfigRepository.findAllOrderedByCityId().stream()
+                .map(AutoBlockCityConfigDto::fromEntity)
+                .collect(java.util.stream.Collectors.toList());
+    }
+
+    /**
+     * Crea o actualiza la configuración de auto-bloqueo para una ciudad.
+     *
+     * @param tenantId Tenant ID
+     * @param cityId Ciudad ID
+     * @param dto DTO con configuración
+     * @return DTO actualizado
+     */
+    @Transactional
+    public AutoBlockCityConfigDto saveAutoBlockConfigForCity(Long tenantId, Integer cityId, AutoBlockCityConfigDto dto) {
+        AutoBlockCityConfigEntity entity = cityConfigRepository.findByCityId(cityId)
+                .orElse(AutoBlockCityConfigEntity.builder()
+                        .cityId(cityId)
+                        .createdAt(LocalDateTime.now())
+                        .build());
+
+        entity.setEnabled(dto.getEnabled() != null ? dto.getEnabled() : false);
+        entity.setCashLimit(dto.getCashLimit() != null ? dto.getCashLimit() : new BigDecimal("150.00"));
+        entity.setUpdatedAt(LocalDateTime.now());
+
+        AutoBlockCityConfigEntity saved = cityConfigRepository.save(entity);
+
+        logger.info("Tenant {}, Ciudad {}: Configuración de auto-bloqueo guardada - enabled={}, limit={}€",
+                tenantId, cityId, saved.getEnabled(), saved.getCashLimit());
+
+        return AutoBlockCityConfigDto.fromEntity(saved);
+    }
+
+    /**
+     * Elimina la configuración de auto-bloqueo de una ciudad.
+     *
+     * @param tenantId Tenant ID
+     * @param cityId Ciudad ID
+     */
+    @Transactional
+    public void deleteAutoBlockConfigForCity(Long tenantId, Integer cityId) {
+        cityConfigRepository.findByCityId(cityId).ifPresent(config -> {
+            cityConfigRepository.delete(config);
+            logger.info("Tenant {}, Ciudad {}: Configuración de auto-bloqueo eliminada", tenantId, cityId);
+        });
+    }
+
+    /**
      * Determina qué acción tomar para un rider.
      */
-    private BlockAction determineAction(RiderLocationDto rider, AutoBlockConfigDto config) {
+    private BlockAction determineAction(RiderLocationDto rider, AutoBlockCityConfigDto config) {
         BigDecimal balance = BigDecimal.valueOf(rider.getWalletBalance());
         BigDecimal limit = config.getCashLimit();
         BigDecimal unblockThreshold = config.getUnblockThreshold();
@@ -210,7 +286,7 @@ public class AutoBlockService {
      * Ejecuta el bloqueo de un rider.
      */
     @Transactional
-    private void executeBlock(Long tenantId, RiderLocationDto rider, AutoBlockConfigDto config) {
+    private void executeBlock(Long tenantId, RiderLocationDto rider, AutoBlockCityConfigDto config) {
         try {
             String employeeId = rider.getEmployeeId();
             Integer riderId = Integer.parseInt(employeeId);
@@ -256,7 +332,7 @@ public class AutoBlockService {
      * Ejecuta el desbloqueo de un rider.
      */
     @Transactional
-    private void executeUnblock(Long tenantId, RiderLocationDto rider, AutoBlockConfigDto config) {
+    private void executeUnblock(Long tenantId, RiderLocationDto rider, AutoBlockCityConfigDto config) {
         try {
             String employeeId = rider.getEmployeeId();
             Integer riderId = Integer.parseInt(employeeId);
