@@ -343,18 +343,6 @@ COMMENT ON FUNCTION create_tenant_schema IS 'Creates a complete tenant schema wi
 -- 5. Usuario completa onboarding vía POST /api/v1/tenant/onboarding/configure
 -- 6. RiTrack crea schema, credenciales y settings automáticamente
 
--- Insert default tenants for LOCAL TESTING
--- hargos_tenant_id corresponde a los IDs en HargosAuth (auth.tenants)
-INSERT INTO public.tenants (id, hargos_tenant_id, name, schema_name, is_active)
-VALUES
-    (1, 1, 'Arendel', 'arendel', false),      -- Desactivado hasta completar onboarding
-    (2, 2, 'Entregalia', 'entregalia', false) -- Desactivado hasta completar onboarding
-ON CONFLICT (id) DO NOTHING;
-
--- Reset sequence to avoid conflicts
-SELECT setval('public.tenants_id_seq', (SELECT MAX(id) FROM public.tenants));
-
-
 -- ==============================================
 -- SECTION 3.2: GLOVO CREDENTIALS Y SETTINGS
 -- ==============================================
