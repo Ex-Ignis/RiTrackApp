@@ -1,6 +1,7 @@
 package es.hargos.ritrack.service;
 
 import es.hargos.ritrack.client.GlovoClient;
+import es.hargos.ritrack.context.TenantContext;
 import es.hargos.ritrack.dto.RiderLocationDto;
 import es.hargos.ritrack.entity.TenantEntity;
 import es.hargos.ritrack.repository.TenantRepository;
@@ -114,10 +115,22 @@ public class RiderLocationService {
                     readyTenants.size(), activeTenants.size());
 
             // Procesar cada tenant configurado de forma asíncrona
+            // IMPORTANTE: Configurar TenantContext para cada hilo async (multi-tenant)
             List<CompletableFuture<Void>> futures = readyTenants.stream()
-                .map(tenant -> CompletableFuture.runAsync(() ->
-                    updateTenantLocations(tenant.getId(), tenant.getName())
-                ))
+                .map(tenant -> CompletableFuture.runAsync(() -> {
+                    // Configurar TenantContext para este hilo (necesario para Hibernate multi-tenant)
+                    TenantContext.setCurrentContext(TenantContext.TenantInfo.builder()
+                        .selectedTenantId(tenant.getId())
+                        .tenantIds(List.of(tenant.getId()))
+                        .schemaNames(List.of(tenant.getSchemaName()))
+                        .tenantNames(List.of(tenant.getName()))
+                        .build());
+                    try {
+                        updateTenantLocations(tenant.getId(), tenant.getName());
+                    } finally {
+                        TenantContext.clear();
+                    }
+                }))
                 .collect(Collectors.toList());
 
             // Esperar a que todos completen

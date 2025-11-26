@@ -75,6 +75,8 @@ public class SecurityConfig {
 
         // Allow specific origins (frontend URLs)
         configuration.setAllowedOrigins(Arrays.asList(
+            "https://hargos.es",
+            "https://ritrack.hargos.es",
             "http://localhost:3000",
             "http://localhost:5173",
             "http://localhost:8080",

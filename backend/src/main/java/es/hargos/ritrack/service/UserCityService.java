@@ -41,10 +41,11 @@ public class UserCityService {
     /**
      * Asigna ciudades a un usuario (reemplaza las existentes).
      *
-     * Este método:
-     * 1. Elimina todas las asignaciones anteriores del usuario
-     * 2. Crea nuevas asignaciones con las ciudades proporcionadas
-     * 3. Registra quién realizó la asignación (para auditoría)
+     * Este método implementa una estrategia de cambios incrementales:
+     * 1. Obtiene las ciudades actualmente asignadas al usuario
+     * 2. Calcula qué ciudades agregar (nuevas que no existen)
+     * 3. Calcula qué ciudades eliminar (que ya no están en la lista)
+     * 4. Aplica solo los cambios necesarios (más eficiente y evita duplicados)
      *
      * @param request Datos de asignación (userId + cityIds)
      * @param assignedByUserId ID del TENANT_ADMIN que realiza la asignación
@@ -62,26 +63,54 @@ public class UserCityService {
     @Transactional
     public void assignCitiesToUser(AssignCitiesRequest request, Long assignedByUserId) {
         Long userId = request.getUserId();
-        List<Long> cityIds = request.getCityIds();
+        List<Long> newCityIds = request.getCityIds();
 
         log.info("Asignando {} ciudades al usuario ID {} (asignado por user ID: {})",
-                cityIds.size(), userId, assignedByUserId);
+                newCityIds.size(), userId, assignedByUserId);
 
-        // 1. Eliminar asignaciones anteriores
-        long deletedCount = countByUserId(userId);
-        if (deletedCount > 0) {
-            userCityRepository.deleteByUserId(userId);
-            log.info("Eliminadas {} asignaciones anteriores del usuario ID {}", deletedCount, userId);
-        }
+        // 1. Obtener ciudades actualmente asignadas
+        List<Long> existingCityIds = userCityRepository.findCityIdsByUserId(userId);
 
-        // 2. Crear nuevas asignaciones
-        List<UserCityAssignmentEntity> assignments = cityIds.stream()
-                .map(cityId -> new UserCityAssignmentEntity(userId, cityId, assignedByUserId))
+        log.debug("Usuario ID {} tiene {} ciudades asignadas actualmente: {}",
+                userId, existingCityIds.size(), existingCityIds);
+
+        // 2. Determinar ciudades a AGREGAR (nuevas que no existen)
+        List<Long> citiesToAdd = newCityIds.stream()
+                .filter(cityId -> !existingCityIds.contains(cityId))
                 .collect(Collectors.toList());
 
-        userCityRepository.saveAll(assignments);
+        // 3. Determinar ciudades a ELIMINAR (existentes que ya no están en la nueva lista)
+        List<Long> citiesToRemove = existingCityIds.stream()
+                .filter(cityId -> !newCityIds.contains(cityId))
+                .collect(Collectors.toList());
 
-        log.info("✅ Ciudades asignadas exitosamente: {} ciudades a usuario ID {}", cityIds.size(), userId);
+        log.info("Cambios requeridos: {} ciudades a agregar, {} ciudades a eliminar",
+                citiesToAdd.size(), citiesToRemove.size());
+
+        // 4. Eliminar ciudades que ya no están en la nueva lista
+        if (!citiesToRemove.isEmpty()) {
+            citiesToRemove.forEach(cityId ->
+                userCityRepository.deleteByUserIdAndCityId(userId, cityId)
+            );
+            log.info("✅ Eliminadas {} ciudades del usuario ID {}", citiesToRemove.size(), userId);
+        }
+
+        // 5. Agregar solo las nuevas ciudades que no existen
+        if (!citiesToAdd.isEmpty()) {
+            List<UserCityAssignmentEntity> newAssignments = citiesToAdd.stream()
+                    .map(cityId -> new UserCityAssignmentEntity(userId, cityId, assignedByUserId))
+                    .collect(Collectors.toList());
+
+            userCityRepository.saveAll(newAssignments);
+            log.info("✅ Agregadas {} nuevas ciudades al usuario ID {}", citiesToAdd.size(), userId);
+        }
+
+        if (citiesToAdd.isEmpty() && citiesToRemove.isEmpty()) {
+            log.info("ℹ️ No hay cambios en las asignaciones de ciudades del usuario ID {}", userId);
+        }
+
+        log.info("✅ Asignación completada: usuario ID {} ahora tiene {} ciudades asignadas",
+                userId, newCityIds.size());
     }
 
     /**
