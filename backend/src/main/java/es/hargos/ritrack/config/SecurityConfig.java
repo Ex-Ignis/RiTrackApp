@@ -49,6 +49,9 @@ public class SecurityConfig {
                         // Public API for external services (HargosAuth, frontend)
                         .requestMatchers("/api/ritrack-public/**").permitAll()
 
+                        // Internal API for service-to-service communication (protected by API Key)
+                        .requestMatchers("/internal/**").permitAll()
+
                         // WebSocket endpoints (authenticated via query param token)
                         .requestMatchers("/ws/**").permitAll()
 

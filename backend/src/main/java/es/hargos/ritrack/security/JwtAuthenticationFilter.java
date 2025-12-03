@@ -271,6 +271,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         // Public endpoints that don't require authentication
         return path.startsWith("/actuator") ||
                path.startsWith("/error") ||
+               path.startsWith("/internal") ||
                path.equals("/");
     }
 }

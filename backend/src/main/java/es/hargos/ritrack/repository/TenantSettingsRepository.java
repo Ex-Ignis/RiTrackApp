@@ -15,4 +15,6 @@ public interface TenantSettingsRepository extends JpaRepository<TenantSettingsEn
     List<TenantSettingsEntity> findByTenantId(Long tenantId);
 
     void deleteByTenantIdAndSettingKey(Long tenantId, String settingKey);
+
+    void deleteByTenantId(Long tenantId);
 }
