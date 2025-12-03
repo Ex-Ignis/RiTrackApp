@@ -120,7 +120,7 @@ public class HibernateConfig {
                 TenantContext.TenantInfo tenantInfo = TenantContext.getCurrentContext();
 
                 if (tenantInfo != null) {
-                    logger.info("🔍 [HibernateConfig] TenantContext found - selectedTenantId: {}, tenantIds: {}, schemaNames: {}",
+                    logger.debug("🔍 [HibernateConfig] TenantContext found - selectedTenantId: {}, tenantIds: {}, schemaNames: {}",
                         tenantInfo.getSelectedTenantId(),
                         tenantInfo.getTenantIds(),
                         tenantInfo.getSchemaNames());
@@ -130,7 +130,7 @@ public class HibernateConfig {
                     String schemaName = tenantInfo.getSelectedSchemaName();
 
                     if (schemaName != null && !schemaName.isEmpty()) {
-                        logger.info("✅ [HibernateConfig] Resolved tenant schema: {}", schemaName);
+                        logger.debug("✅ [HibernateConfig] Resolved tenant schema: {}", schemaName);
                         return schemaName;
                     }
 

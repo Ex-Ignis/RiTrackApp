@@ -44,6 +44,19 @@ public class RiderLocationService {
 
     private static final Logger logger = LoggerFactory.getLogger(RiderLocationService.class);
 
+    // Pool de threads fijo para actualización de ubicaciones por tenant (evita crear threads infinitos)
+    private static final java.util.concurrent.ExecutorService TENANT_LOCATION_EXECUTOR =
+        java.util.concurrent.Executors.newFixedThreadPool(12, new java.util.concurrent.ThreadFactory() {
+            private final java.util.concurrent.atomic.AtomicInteger counter =
+                new java.util.concurrent.atomic.AtomicInteger(0);
+            @Override
+            public Thread newThread(Runnable r) {
+                Thread t = new Thread(r, "TenantLocation-" + counter.incrementAndGet());
+                t.setDaemon(true);
+                return t;
+            }
+        });
+
     // ===============================================
     // CONFIGURACIÓN Y DEPENDENCIAS
     // ===============================================
@@ -114,7 +127,7 @@ public class RiderLocationService {
             logger.info("Actualizando ubicaciones para {} tenants configurados (de {} activos)",
                     readyTenants.size(), activeTenants.size());
 
-            // Procesar cada tenant configurado de forma asíncrona
+            // Procesar cada tenant configurado de forma asíncrona usando pool fijo
             // IMPORTANTE: Configurar TenantContext para cada hilo async (multi-tenant)
             List<CompletableFuture<Void>> futures = readyTenants.stream()
                 .map(tenant -> CompletableFuture.runAsync(() -> {
@@ -130,7 +143,7 @@ public class RiderLocationService {
                     } finally {
                         TenantContext.clear();
                     }
-                }))
+                }, TENANT_LOCATION_EXECUTOR))  // Usar pool fijo en lugar de ForkJoinPool.commonPool()
                 .collect(Collectors.toList());
 
             // Esperar a que todos completen
@@ -536,5 +549,23 @@ public class RiderLocationService {
     private String getRandomStatus(Random random) {
         String[] statuses = {"WORKING", "READY", "AVAILABLE", "BREAK", "NOT_WORKING"};
         return statuses[random.nextInt(statuses.length)];
+    }
+
+    /**
+     * Libera recursos del ExecutorService al cerrar la aplicación
+     */
+    @jakarta.annotation.PreDestroy
+    public void shutdown() {
+        logger.info("Cerrando RiderLocationService...");
+        TENANT_LOCATION_EXECUTOR.shutdown();
+        try {
+            if (!TENANT_LOCATION_EXECUTOR.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                TENANT_LOCATION_EXECUTOR.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            TENANT_LOCATION_EXECUTOR.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+        logger.info("RiderLocationService cerrado correctamente");
     }
 }

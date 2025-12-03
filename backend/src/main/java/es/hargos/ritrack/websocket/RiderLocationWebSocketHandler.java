@@ -40,6 +40,9 @@ public class RiderLocationWebSocketHandler implements WebSocketHandler {
     // Set para sesiones que quieren ver todas las ciudades
     private final CopyOnWriteArraySet<WebSocketSession> allCitiesSessions = new CopyOnWriteArraySet<>();
 
+    // Mapa para guardar tareas de ping por sesión (para poder cancelarlas)
+    private final ConcurrentHashMap<String, java.util.concurrent.ScheduledFuture<?>> sessionPingTasks = new ConcurrentHashMap<>();
+
     // ObjectMapper para serializar JSON
     private final ObjectMapper objectMapper;
 
@@ -68,17 +71,33 @@ public class RiderLocationWebSocketHandler implements WebSocketHandler {
         //sendMessageToSession(session, createWelcomeMessage());
 
         // Programar ping cada 30 segundos para mantener la conexión activa
-        scheduler.scheduleAtFixedRate(() -> {
+        // Guardamos la referencia para poder cancelarla cuando se cierre la sesión
+        java.util.concurrent.ScheduledFuture<?> pingTask = scheduler.scheduleAtFixedRate(() -> {
             if (session.isOpen()) {
                 try {
                     session.sendMessage(new PingMessage());
-                    //logger.info("Ping enviado");
                 } catch (IOException e) {
-                    logger.warn("Error enviando ping nativo a sesion {}: {}", session.getId(), e.getMessage());
+                    logger.warn("Error enviando ping a sesion {}: {}", session.getId(), e.getMessage());
+                    cancelPingTask(session.getId());
                     removeSessionFromAllSubscriptions(session);
                 }
+            } else {
+                // Si la sesión ya no está abierta, cancelar esta tarea
+                cancelPingTask(session.getId());
             }
         }, 30, 30, TimeUnit.SECONDS);
+        sessionPingTasks.put(session.getId(), pingTask);
+    }
+
+    /**
+     * Cancela la tarea de ping para una sesión específica
+     */
+    private void cancelPingTask(String sessionId) {
+        java.util.concurrent.ScheduledFuture<?> pingTask = sessionPingTasks.remove(sessionId);
+        if (pingTask != null) {
+            pingTask.cancel(false);
+            logger.debug("Tarea de ping cancelada para sesión {}", sessionId);
+        }
     }
 
     //Manejo de los mensajes entrantes y sus respuestas
@@ -342,12 +361,14 @@ public class RiderLocationWebSocketHandler implements WebSocketHandler {
     public void handleTransportError(WebSocketSession session, Throwable exception) throws Exception {
         logger.error("Error en transporte WebSocket para sesion {}: {}",
                 session.getId(), exception.getMessage());
+        cancelPingTask(session.getId()); // Cancelar tarea de ping
         removeSessionFromAllSubscriptions(session);
         sessionTenantMap.remove(session.getId()); // Limpiar autenticación
     }
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus closeStatus) throws Exception {
+        cancelPingTask(session.getId()); // Cancelar tarea de ping
         removeSessionFromAllSubscriptions(session);
         sessionTenantMap.remove(session.getId()); // Limpiar autenticación
         logger.info("Conexion WebSocket cerrada. ID: {}. Estado: {}. Conexiones activas: {}",
@@ -368,14 +389,14 @@ public class RiderLocationWebSocketHandler implements WebSocketHandler {
      * @param locations Ubicaciones de riders
      */
     public void broadcastRiderLocationsByCity(Long tenantId, Integer cityId, List<RiderLocationDto> locations) {
-        logger.info("=== BROADCAST DEBUG ===");
-        logger.info("TenantId: {}", tenantId);
-        logger.info("CityId recibido: {}", cityId);
-        logger.info("Locations a enviar: {}", locations.size());
-        logger.info("Sesiones en citySessions para ciudad {}: {}", cityId,
+        logger.debug("=== BROADCAST DEBUG ===");
+        logger.debug("TenantId: {}", tenantId);
+        logger.debug("CityId recibido: {}", cityId);
+        logger.debug("Locations a enviar: {}", locations.size());
+        logger.debug("Sesiones en citySessions para ciudad {}: {}", cityId,
                 citySessions.containsKey(cityId) ? citySessions.get(cityId).size() : 0);
-        logger.info("Sesiones totales en allCitiesSessions: {}", allCitiesSessions.size());
-        logger.info("SessionTenantMap: {}", sessionTenantMap);
+        logger.debug("Sesiones totales en allCitiesSessions: {}", allCitiesSessions.size());
+        logger.debug("SessionTenantMap: {}", sessionTenantMap);
 
         if (locations.isEmpty()) {
             logger.debug("Tenant {}, Ciudad {}: No hay ubicaciones para enviar", tenantId, cityId);
@@ -385,34 +406,25 @@ public class RiderLocationWebSocketHandler implements WebSocketHandler {
         // MULTI-TENANT: Filtrar sesiones específicas de esta ciudad que pertenecen al tenant
         CopyOnWriteArraySet<WebSocketSession> citySpecificSessions = citySessions.get(cityId);
         if (citySpecificSessions != null && !citySpecificSessions.isEmpty()) {
-            logger.info("📍 Hay {} sesiones para ciudad {}", citySpecificSessions.size(), cityId);
+            logger.debug("📍 Hay {} sesiones para ciudad {}", citySpecificSessions.size(), cityId);
             Set<WebSocketSession> tenantSessions = filterSessionsByTenant(citySpecificSessions, tenantId);
-            logger.info("🔒 Después de filtrar por tenant {}: {} sesiones", tenantId, tenantSessions.size());
+            logger.debug("🔒 Después de filtrar por tenant {}: {} sesiones", tenantId, tenantSessions.size());
             if (!tenantSessions.isEmpty()) {
                 broadcastToSessions(tenantSessions, createLocationMessage(locations, cityId));
-                logger.info("✅ Tenant {}, Ciudad {}: Enviadas {} ubicaciones a {} sesiones",
+                logger.debug("✅ Tenant {}, Ciudad {}: Enviadas {} ubicaciones a {} sesiones",
                         tenantId, cityId, locations.size(), tenantSessions.size());
-            } else {
-                logger.warn("⚠️ No hay sesiones del tenant {} para ciudad {}", tenantId, cityId);
             }
-        } else {
-            logger.info("📍 No hay sesiones suscritas a ciudad {}", cityId);
         }
 
         // MULTI-TENANT: Filtrar sesiones de todas las ciudades que pertenecen al tenant
         if (!allCitiesSessions.isEmpty()) {
-            logger.info("🌍 Hay {} sesiones suscritas a todas las ciudades", allCitiesSessions.size());
+            logger.debug("🌍 Hay {} sesiones suscritas a todas las ciudades", allCitiesSessions.size());
             Set<WebSocketSession> tenantSessions = filterSessionsByTenant(allCitiesSessions, tenantId);
-            logger.info("🔒 Después de filtrar por tenant {}: {} sesiones", tenantId, tenantSessions.size());
             if (!tenantSessions.isEmpty()) {
                 broadcastToSessions(tenantSessions, createLocationMessage(locations, cityId));
-                logger.info("✅ Tenant {}: Enviadas {} ubicaciones a {} sesiones (todas las ciudades)",
+                logger.debug("✅ Tenant {}: Enviadas {} ubicaciones a {} sesiones (todas las ciudades)",
                         tenantId, locations.size(), tenantSessions.size());
-            } else {
-                logger.debug("⚠️ No hay sesiones del tenant {} en allCitiesSessions", tenantId);
             }
-        } else {
-            logger.info("🌍 No hay sesiones suscritas a todas las ciudades");
         }
     }
 
@@ -537,11 +549,15 @@ public class RiderLocationWebSocketHandler implements WebSocketHandler {
     }
 
     public void destroy() {
+        // Cancelar todas las tareas de ping pendientes
+        sessionPingTasks.values().forEach(task -> task.cancel(false));
+        sessionPingTasks.clear();
         scheduler.shutdown();
         sessionTenantMap.clear();
         sessionCityMap.clear();
         citySessions.clear();
         allCitiesSessions.clear();
+        logger.info("RiderLocationWebSocketHandler destruido - recursos liberados");
     }
 
     // ################################################################################################################

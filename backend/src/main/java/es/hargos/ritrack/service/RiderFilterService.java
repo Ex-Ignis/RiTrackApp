@@ -44,6 +44,14 @@ public class RiderFilterService {
     // Control de concurrencia para API
     private static final Semaphore API_SEMAPHORE = new Semaphore(20); // Max 20 llamadas API simultáneas
 
+    // Pool compartido para procesamiento de Rooster (reutilizado en lugar de crear uno nuevo cada vez)
+    private static final java.util.concurrent.ForkJoinPool ROOSTER_POOL = new java.util.concurrent.ForkJoinPool(
+        10,
+        java.util.concurrent.ForkJoinPool.defaultForkJoinWorkerThreadFactory,
+        null,
+        false
+    );
+
     // Métricas de rendimiento
     private final AtomicInteger activeSearches = new AtomicInteger(0);
     private final AtomicLong totalSearchTime = new AtomicLong(0);
@@ -448,10 +456,9 @@ public class RiderFilterService {
             }
             final List<Integer> finalUserCityIds = userCityIdsInt;
 
-            // Usar parallel stream con límite de threads
-            ForkJoinPool customThreadPool = new ForkJoinPool(10);
+            // Usar parallel stream con pool compartido (reutilizado en lugar de crear uno nuevo)
             try {
-                results = customThreadPool.submit(() ->
+                results = ROOSTER_POOL.submit(() ->
                         allEmployees.parallelStream()
                                 .map(emp -> {
                                     try {
@@ -467,7 +474,7 @@ public class RiderFilterService {
                                 .filter(Objects::nonNull)
                                 .filter(rider -> matchesRoosterFilters(rider, filters))
                                 .filter(rider -> {
-                                    // NUEVO: Aplicar filtro de ciudades del usuario
+                                    // Aplicar filtro de ciudades del usuario
                                     if (finalUserCityIds != null && !finalUserCityIds.isEmpty()) {
                                         return rider.getCityId() != null && finalUserCityIds.contains(rider.getCityId());
                                     }
@@ -475,8 +482,12 @@ public class RiderFilterService {
                                 })
                                 .collect(Collectors.toList())
                 ).get(5, TimeUnit.SECONDS);
-            } finally {
-                customThreadPool.shutdown();
+            } catch (java.util.concurrent.TimeoutException e) {
+                logger.warn("Timeout procesando Rooster data para tenant {}", tenantId);
+                results = new ArrayList<>();
+            } catch (java.util.concurrent.ExecutionException e) {
+                logger.error("Error procesando Rooster: {}", e.getMessage());
+                results = new ArrayList<>();
             }
 
             long duration = System.currentTimeMillis() - startTime;
@@ -819,14 +830,20 @@ public class RiderFilterService {
     public void shutdown() {
         logger.info("Cerrando servicio de búsqueda...");
         SHARED_EXECUTOR.shutdown();
+        ROOSTER_POOL.shutdown();
         try {
             if (!SHARED_EXECUTOR.awaitTermination(5, TimeUnit.SECONDS)) {
                 SHARED_EXECUTOR.shutdownNow();
             }
+            if (!ROOSTER_POOL.awaitTermination(5, TimeUnit.SECONDS)) {
+                ROOSTER_POOL.shutdownNow();
+            }
         } catch (InterruptedException e) {
             SHARED_EXECUTOR.shutdownNow();
+            ROOSTER_POOL.shutdownNow();
             Thread.currentThread().interrupt();
         }
+        logger.info("Servicio de búsqueda cerrado correctamente");
     }
 
     // Clase interna para caché
