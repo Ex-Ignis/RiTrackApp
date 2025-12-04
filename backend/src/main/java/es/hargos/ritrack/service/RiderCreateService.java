@@ -60,7 +60,7 @@ public class RiderCreateService {
         String emailDomain = tenantSettingsService.getEmailDomain(tenantId);
         String emailBase = tenantSettingsService.getEmailBase(tenantId);
 
-        String email = String.format("%s+%d@%s", emailDomain, emailNumber, emailBase);
+        String email = String.format("%s+%d@%s", emailBase, emailNumber, emailDomain);
         logger.info("Tenant {}: Email generado basado en {} empleados: {}", tenantId, totalEmployees, email);
         return email;
     }
