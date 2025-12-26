@@ -9,6 +9,7 @@ import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import es.hargos.ritrack.client.GlovoClient;
 import es.hargos.ritrack.dto.OnboardingDto;
+import es.hargos.ritrack.exception.MultipleContractsException;
 import es.hargos.ritrack.dto.OnboardingStatusDto;
 import es.hargos.ritrack.entity.GlovoCredentialsEntity;
 import es.hargos.ritrack.entity.TenantEntity;
@@ -211,6 +212,16 @@ public class TenantOnboardingService {
 
             return OnboardingStatusDto.configured(tenant.getName(), tenant.getSchemaName());
 
+        } catch (MultipleContractsException e) {
+            // Propagar directamente para que el controller la maneje y muestre selector
+            // Limpiar .pem temporal ya que no completamos el provisioning
+            try {
+                String pemPath = "./keys/tenant_" + tenantId + ".pem";
+                fileStorageService.deletePemFile(pemPath);
+            } catch (Exception cleanupError) {
+                logger.warn("Tenant {}: Error limpiando .pem: {}", tenantId, cleanupError.getMessage());
+            }
+            throw e;
         } catch (Exception e) {
             logger.error("Tenant {}: Error durante provisioning: {}", tenantId, e.getMessage(), e);
 
@@ -547,13 +558,15 @@ public class TenantOnboardingService {
                     onboardingData.setContractId(contractId);
                     logger.info("Auto-detectado contractId: {} (único contrato disponible)", contractId);
                 } else {
-                    throw new IllegalArgumentException(
-                            "Se encontraron " + contracts.size() + " contratos. Debe especificar contractId. " +
-                            "Use el endpoint /validate-credentials para ver los contratos disponibles."
-                    );
+                    // Lanzar excepción especial que el controller manejará para mostrar selector
+                    logger.info("Múltiples contratos detectados ({}), requiere selección del usuario", contracts.size());
+                    throw new MultipleContractsException(contracts, companyId);
                 }
             }
 
+        } catch (MultipleContractsException e) {
+            // Propagar directamente para que el controller la maneje
+            throw e;
         } catch (Exception e) {
             logger.error("Error auto-detectando company/contract: {}", e.getMessage());
             throw new Exception("No se pudo auto-detectar companyId/contractId: " + e.getMessage(), e);

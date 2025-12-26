@@ -4,6 +4,7 @@ import es.hargos.ritrack.context.TenantContext;
 import es.hargos.ritrack.dto.OnboardingDto;
 import es.hargos.ritrack.dto.OnboardingStatusDto;
 import es.hargos.ritrack.dto.UpdateCredentialsRequest;
+import es.hargos.ritrack.exception.MultipleContractsException;
 import es.hargos.ritrack.service.TenantOnboardingService;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -170,6 +171,17 @@ public class TenantOnboardingController {
             error.put("error", "Tenant ya configurado");
             error.put("message", e.getMessage());
             return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
+
+        } catch (MultipleContractsException e) {
+            // Múltiples contratos disponibles - el usuario debe seleccionar uno
+            // Esto NO es un error, es una respuesta especial para el frontend
+            logger.info("Múltiples contratos detectados, solicitando selección al usuario");
+            Map<String, Object> response = new HashMap<>();
+            response.put("needsContractSelection", true);
+            response.put("contracts", e.getContracts());
+            response.put("companyId", e.getCompanyId());
+            response.put("message", "Seleccione un contrato para continuar");
+            return ResponseEntity.ok(response);
 
         } catch (IllegalArgumentException e) {
             // Datos inválidos (credenciales, .pem, etc.)
