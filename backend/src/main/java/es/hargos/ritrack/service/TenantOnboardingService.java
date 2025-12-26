@@ -847,7 +847,8 @@ public class TenantOnboardingService {
     }
 
     /**
-     * Inserta configuraciones por defecto en tenant_settings.
+     * Inserta o actualiza configuraciones en tenant_settings.
+     * Usa UPSERT para evitar errores de duplicate key.
      */
     private void insertTenantSettings(TenantEntity tenant, OnboardingDto data) {
         // active_city_ids
@@ -856,17 +857,17 @@ public class TenantOnboardingService {
                     .map(String::valueOf)
                     .collect(Collectors.joining(","));
 
-            saveSetting(tenant, "active_city_ids", cityIds, "JSON", "Ciudades activas para monitoreo de riders");
+            updateOrCreateSetting(tenant, "active_city_ids", cityIds, "JSON", "Ciudades activas para monitoreo de riders");
         }
 
         // rider_email_domain
-        saveSetting(tenant, "rider_email_domain", data.getEmailDomain(), "STRING", "Dominio para emails automáticos de riders");
+        updateOrCreateSetting(tenant, "rider_email_domain", data.getEmailDomain(), "STRING", "Dominio para emails automáticos de riders");
 
         // rider_email_base
-        saveSetting(tenant, "rider_email_base", data.getEmailBase(), "STRING", "Base de email para riders");
+        updateOrCreateSetting(tenant, "rider_email_base", data.getEmailBase(), "STRING", "Base de email para riders");
 
         // rider_name_base
-        saveSetting(tenant, "rider_name_base", data.getNameBase(), "STRING", "Prefijo para nombres automáticos de riders");
+        updateOrCreateSetting(tenant, "rider_name_base", data.getNameBase(), "STRING", "Prefijo para nombres automáticos de riders");
 
         // default_vehicle_type_ids
         if (data.getDefaultVehicleTypeIds() != null && !data.getDefaultVehicleTypeIds().isEmpty()) {
@@ -874,33 +875,17 @@ public class TenantOnboardingService {
                     .map(String::valueOf)
                     .collect(Collectors.joining(","));
 
-            saveSetting(tenant, "default_vehicle_type_ids", vehicleIds, "JSON", "Tipos de vehículo por defecto");
+            updateOrCreateSetting(tenant, "default_vehicle_type_ids", vehicleIds, "JSON", "Tipos de vehículo por defecto");
         } else {
             // Default: Bike, Car, Motorbike, Scooter
-            saveSetting(tenant, "default_vehicle_type_ids", "5,1,3,2", "JSON", "Tipos de vehículo por defecto");
+            updateOrCreateSetting(tenant, "default_vehicle_type_ids", "5,1,3,2", "JSON", "Tipos de vehículo por defecto");
         }
 
         // auto_block_enabled (DESACTIVADO por defecto)
-        saveSetting(tenant, "auto_block_enabled", "false", "BOOLEAN", "Activar bloqueo automático por saldo de cash alto");
+        updateOrCreateSetting(tenant, "auto_block_enabled", "false", "BOOLEAN", "Activar bloqueo automático por saldo de cash alto");
 
         // auto_block_cash_limit (límite por defecto: 150€)
-        saveSetting(tenant, "auto_block_cash_limit", "150.00", "NUMBER", "Límite de cash en € para bloqueo automático");
-    }
-
-    /**
-     * Helper para guardar un setting.
-     */
-    private void saveSetting(TenantEntity tenant, String key, String value, String type, String description) {
-        TenantSettingsEntity setting = TenantSettingsEntity.builder()
-                .tenant(tenant)
-                .settingKey(key)
-                .settingValue(value)
-                .settingType(type)
-                .description(description)
-                .build();
-
-        settingsRepository.save(setting);
-        logger.debug("Setting guardado: {} = {}", key, value);
+        updateOrCreateSetting(tenant, "auto_block_cash_limit", "150.00", "NUMBER", "Límite de cash en € para bloqueo automático");
     }
 
     // Helpers para obtener URLs con valores por defecto
