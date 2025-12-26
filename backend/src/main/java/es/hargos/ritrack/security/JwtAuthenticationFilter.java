@@ -95,12 +95,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
      *
      * Flow:
      * 1. Check if user has global role (SUPER_ADMIN)
-     * 2. If SUPER_ADMIN, authenticate without tenants
-     * 3. Otherwise, extract tenants from JWT
-     * 4. Read X-Tenant-Id header from request
-     * 5. Validate header value is in JWT's tenant list
-     * 6. Find or create tenant in RiTrack
-     * 7. Set TenantContext with selected tenant
+     * 2. If SUPER_ADMIN with X-Tenant-Id, setup context for that tenant (BYPASSING JWT validation)
+     * 3. If SUPER_ADMIN without X-Tenant-Id, authenticate globally
+     * 4. Otherwise, extract tenants from JWT
+     * 5. Read X-Tenant-Id header from request
+     * 6. Validate header value is in JWT's tenant list
+     * 7. Find or create tenant in RiTrack
+     * 8. Set TenantContext with selected tenant
      */
     private void authenticateUser(String jwt, HttpServletRequest request, HttpServletResponse response) throws IOException {
         try {
@@ -108,7 +109,22 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             String globalRole = jwtUtil.extractGlobalRole(jwt);
 
             if ("SUPER_ADMIN".equals(globalRole)) {
-                setupSuperAdminContext(jwt, request);
+                // SUPER_ADMIN puede acceder a CUALQUIER tenant, incluso si no está en su JWT
+                String tenantIdHeader = request.getHeader("X-Tenant-Id");
+
+                if (tenantIdHeader != null && !tenantIdHeader.trim().isEmpty()) {
+                    // SUPER_ADMIN con tenant específico - configurar TenantContext
+                    try {
+                        Long requestedTenantId = Long.parseLong(tenantIdHeader);
+                        setupSuperAdminContextWithTenant(jwt, request, requestedTenantId);
+                    } catch (NumberFormatException e) {
+                        log.error("Invalid X-Tenant-Id header format: {}", tenantIdHeader);
+                        return;
+                    }
+                } else {
+                    // SUPER_ADMIN sin tenant específico - solo autenticar globalmente
+                    setupSuperAdminContext(jwt, request);
+                }
                 return;
             }
 
@@ -196,6 +212,54 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         SecurityContextHolder.getContext().setAuthentication(authentication);
 
         log.debug("SUPER_ADMIN {} authenticated without tenant context", email);
+    }
+
+    /**
+     * Setup authentication for SUPER_ADMIN with TenantContext for a specific tenant.
+     * SUPER_ADMIN can access ANY tenant, even if not in their JWT tenant list.
+     */
+    private void setupSuperAdminContextWithTenant(String jwt, HttpServletRequest request, Long hargosTenantId) {
+        // Find or create tenant in RiTrack (SUPER_ADMIN can access any tenant)
+        TenantEntity tenant = tenantService.findOrCreateByHargosTenantId(
+                hargosTenantId,
+                "Tenant-" + hargosTenantId // Fallback name if tenant doesn't exist
+        );
+
+        // Extract user info from JWT
+        Long userId = jwtUtil.getUserIdFromToken(jwt);
+        String email = jwtUtil.getEmailFromToken(jwt);
+
+        // Create TenantContext for the requested tenant
+        TenantContext.TenantInfo contextInfo = TenantContext.TenantInfo.builder()
+                .userId(userId)
+                .email(email)
+                .tenantIds(Collections.singletonList(tenant.getId()))
+                .tenantNames(Collections.singletonList(tenant.getName()))
+                .schemaNames(Collections.singletonList(tenant.getSchemaName()))
+                .selectedTenantId(tenant.getId())
+                .roles(Collections.singletonList("SUPER_ADMIN"))
+                .build();
+
+        log.info("🎯 [JwtAuthenticationFilter] SUPER_ADMIN Setting TenantContext - selectedTenantId: {}, selectedSchema: {}",
+                tenant.getId(), tenant.getSchemaName());
+
+        TenantContext.setCurrentContext(contextInfo);
+
+        // Set Spring Security authentication with SUPER_ADMIN role
+        List<SimpleGrantedAuthority> authorities = Collections.singletonList(
+                new SimpleGrantedAuthority("ROLE_SUPER_ADMIN")
+        );
+
+        UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+                email,
+                null,
+                authorities
+        );
+        authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+
+        log.info("✅ SUPER_ADMIN {} authenticated for tenant '{}' (RiTrack ID: {}, HargosAuth ID: {})",
+                email, tenant.getName(), tenant.getId(), tenant.getHargosTenantId());
     }
 
     /**
