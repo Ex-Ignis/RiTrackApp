@@ -119,7 +119,7 @@ public class TenantOnboardingController {
     @PreAuthorize("hasRole('TENANT_ADMIN')")
     @PostMapping(value = "/configure", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<?> configureTenant(
-            @RequestParam("pemFile") MultipartFile pemFile,
+            @RequestParam(value = "pemFile", required = false) MultipartFile pemFile,
             @Valid @ModelAttribute OnboardingDto onboardingData
     ) {
         try {
@@ -142,8 +142,11 @@ public class TenantOnboardingController {
 
             logger.info("Tenant {}: Iniciando configuración de onboarding", tenantId);
 
-            // Validar que el archivo .pem esté presente
-            if (pemFile == null || pemFile.isEmpty()) {
+            // Validar que el archivo .pem esté presente O que haya pemFileId (archivo temporal)
+            boolean hasPemFile = pemFile != null && !pemFile.isEmpty();
+            boolean hasPemFileId = onboardingData.getPemFileId() != null && !onboardingData.getPemFileId().isEmpty();
+
+            if (!hasPemFile && !hasPemFileId) {
                 Map<String, String> error = new HashMap<>();
                 error.put("error", "Archivo .pem requerido");
                 error.put("message", "Debe proporcionar un archivo .pem con la clave privada");
@@ -151,10 +154,11 @@ public class TenantOnboardingController {
             }
 
             // Provisionar tenant (proceso completo automático)
+            // Si hay pemFileId pero no pemFile, el servicio usará el archivo temporal
             OnboardingStatusDto result = onboardingService.provisionTenant(
                     tenantId,
                     onboardingData,
-                    pemFile
+                    hasPemFile ? pemFile : null
             );
 
             // Validar límites de riders DESPUÉS de que la transacción termine
@@ -175,11 +179,12 @@ public class TenantOnboardingController {
         } catch (MultipleContractsException e) {
             // Múltiples contratos disponibles - el usuario debe seleccionar uno
             // Esto NO es un error, es una respuesta especial para el frontend
-            logger.info("Múltiples contratos detectados, solicitando selección al usuario");
+            logger.info("Múltiples contratos detectados, solicitando selección al usuario. pemFileId: {}", e.getPemFileId());
             Map<String, Object> response = new HashMap<>();
             response.put("needsContractSelection", true);
             response.put("contracts", e.getContracts());
             response.put("companyId", e.getCompanyId());
+            response.put("pemFileId", e.getPemFileId()); // Para reenviar sin subir el archivo de nuevo
             response.put("message", "Seleccione un contrato para continuar");
             return ResponseEntity.ok(response);
 

@@ -174,9 +174,24 @@ public class TenantOnboardingService {
         }
 
         try {
-            // 3. Guardar archivo .pem temporalmente para validación
-            String pemPath = fileStorageService.savePemFile(tenantId, pemFile);
-            logger.info("Tenant {}: Archivo .pem guardado en {}", tenantId, pemPath);
+            // 3. Determinar ruta del .pem (nuevo archivo o archivo temporal existente)
+            String pemPath;
+            if (pemFile != null) {
+                // Nuevo archivo - guardarlo
+                pemPath = fileStorageService.savePemFile(tenantId, pemFile);
+                logger.info("Tenant {}: Archivo .pem guardado en {}", tenantId, pemPath);
+            } else if (onboardingData.getPemFileId() != null && !onboardingData.getPemFileId().isEmpty()) {
+                // Usar archivo temporal existente
+                pemPath = onboardingData.getPemFileId();
+                logger.info("Tenant {}: Usando archivo .pem temporal: {}", tenantId, pemPath);
+
+                // Verificar que el archivo existe
+                if (!fileStorageService.validatePemFileExists(pemPath)) {
+                    throw new IllegalArgumentException("Archivo .pem temporal no encontrado: " + pemPath);
+                }
+            } else {
+                throw new IllegalArgumentException("Se requiere archivo .pem o pemFileId");
+            }
 
             // 4. Validar credenciales con Glovo API (llamada de prueba)
             logger.info("Tenant {}: Validando credenciales con Glovo API...", tenantId);
@@ -214,13 +229,9 @@ public class TenantOnboardingService {
 
         } catch (MultipleContractsException e) {
             // Propagar directamente para que el controller la maneje y muestre selector
-            // Limpiar .pem temporal ya que no completamos el provisioning
-            try {
-                String pemPath = "./keys/tenant_" + tenantId + ".pem";
-                fileStorageService.deletePemFile(pemPath);
-            } catch (Exception cleanupError) {
-                logger.warn("Tenant {}: Error limpiando .pem: {}", tenantId, cleanupError.getMessage());
-            }
+            // NO eliminamos el .pem - lo necesitamos para cuando el usuario seleccione contrato
+            logger.info("Tenant {}: .pem guardado temporalmente en {}, esperando selección de contrato",
+                       tenantId, e.getPemFileId());
             throw e;
         } catch (Exception e) {
             logger.error("Tenant {}: Error durante provisioning: {}", tenantId, e.getMessage(), e);
@@ -559,8 +570,9 @@ public class TenantOnboardingService {
                     logger.info("Auto-detectado contractId: {} (único contrato disponible)", contractId);
                 } else {
                     // Lanzar excepción especial que el controller manejará para mostrar selector
+                    // Incluimos pemPath para que el frontend pueda reenviar sin el archivo
                     logger.info("Múltiples contratos detectados ({}), requiere selección del usuario", contracts.size());
-                    throw new MultipleContractsException(contracts, companyId);
+                    throw new MultipleContractsException(contracts, companyId, pemPath);
                 }
             }
 

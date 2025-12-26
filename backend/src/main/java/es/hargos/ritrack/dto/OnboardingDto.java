@@ -31,6 +31,12 @@ public class OnboardingDto {
      */
     private Integer contractId;
 
+    /**
+     * ID del archivo .pem guardado temporalmente (cuando hay múltiples contratos).
+     * Si se envía este campo, no es necesario reenviar el archivo .pem.
+     */
+    private String pemFileId;
+
     // NOTA: El archivo .pem se envía como MultipartFile en el request
     // y se procesa directamente en el controller
 

@@ -14,11 +14,13 @@ public class MultipleContractsException extends RuntimeException {
 
     private final List<Map<String, Object>> contracts;
     private final Integer companyId;
+    private final String pemFileId;
 
-    public MultipleContractsException(List<Map<String, Object>> contracts, Integer companyId) {
+    public MultipleContractsException(List<Map<String, Object>> contracts, Integer companyId, String pemFileId) {
         super("Se encontraron " + contracts.size() + " contratos. Debe seleccionar uno.");
         this.contracts = contracts;
         this.companyId = companyId;
+        this.pemFileId = pemFileId;
     }
 
     public List<Map<String, Object>> getContracts() {
@@ -27,5 +29,9 @@ public class MultipleContractsException extends RuntimeException {
 
     public Integer getCompanyId() {
         return companyId;
+    }
+
+    public String getPemFileId() {
+        return pemFileId;
     }
 }
